@@ -1,8 +1,31 @@
-# Vendora — SaaS E-Commerce Dashboard 🚀
+<div align="center">
 
-Vendora is a modern, full-stack e-commerce **admin/staff dashboard** designed to seamlessly manage products (inventory), orders, and operational notifications with strict role-based access control (RBAC).
+  # Vendora — SaaS E-Commerce Dashboard 🚀
 
-Featuring a sleek dark-themed UI with neon accents, it provides business owners with real-time analytics, optimistic UI updates, and robust backend architecture. Data is stored in **MongoDB** and survives browser restarts as long as the database is unchanged.
+  *A modern, full-stack e-commerce admin/staff dashboard designed to seamlessly manage products, orders, and operational notifications with strict role-based access control (RBAC).*
+
+  <br />
+
+  <p align="center">
+    <a href="https://vendora-saa-s-e-commerce-dashboard.vercel.app/">
+      <img src="https://img.shields.io/badge/🌐%20Live%20Demo-Vendora%20Dashboard-D4FF00?style=for-the-badge&labelColor=111111" alt="Live Demo" />
+    </a>
+  </p>
+
+</div>
+
+---
+
+**Demo Accounts (Read-only / Sandbox mode):**
+
+| Role  | Email               | Password    |
+|-------|---------------------|-------------|
+| Admin | `admin@vendora.com` | `Admin@123` |
+| Staff | `staff@vendora.com` | `Staff@123` |
+
+---
+
+Vendora features a sleek dark-themed UI with neon accents, providing business owners with real-time analytics, optimistic UI updates, and robust backend architecture. Data is stored in **MongoDB** and survives browser restarts as long as the database is unchanged.
 
 ---
 
@@ -49,6 +72,16 @@ Featuring a sleek dark-themed UI with neon accents, it provides business owners 
 * JSON Web Tokens (JWT) & Bcrypt.js (Security)
 * Multer (File uploads)
 * Morgan & CORS
+
+---
+
+## ☁️ Deployment Architecture
+
+This application is fully deployed and accessible over the internet using modern cloud infrastructure:
+
+* **Database:** Hosted on **MongoDB Atlas** for reliable, scalable cloud data storage.
+* **Backend API:** Deployed as a Web Service on **Render.com**, handling business logic, authentication, and database communications.
+* **Frontend:** Deployed on **Vercel**, providing a fast, global edge network for the React Single Page Application (SPA). Vercel is configured with `vercel.json` to seamlessly handle client-side routing.
 
 ---
 
@@ -153,8 +186,8 @@ Base URL: `http://localhost:5000/api`
 
 ### Auth (`/api/auth`)
 
-| Method   | Path       | Notes                                                     |
-|----------|------------|-----------------------------------------------------------|
+| Method   | Path        | Notes                                                    |
+|----------|-------------|----------------------------------------------------------|
 | `POST`   | `/register` |                                                          |
 | `POST`   | `/login`    |                                                          |
 | `GET`    | `/me`       | Protected                                                |
@@ -166,34 +199,34 @@ Base URL: `http://localhost:5000/api`
 
 ### Products (`/api/products`)
 
-| Method   | Path              | Access       |
-|----------|-------------------|--------------|
-| `GET`    | `/`               | Protected    |
+| Method   | Path                | Access       |
+|----------|---------------------|--------------|
+| `GET`    | `/`                 | Protected    |
 | `GET`    | `/alerts/low-stock` | Admin, Staff |
-| `GET`    | `/:id`            | Protected    |
-| `POST`   | `/`               | Admin        |
-| `PUT`    | `/:id`            | Admin        |
-| `DELETE` | `/:id`            | Admin        |
+| `GET`    | `/:id`              | Protected    |
+| `POST`   | `/`                 | Admin        |
+| `PUT`    | `/:id`              | Admin        |
+| `DELETE` | `/:id`              | Admin        |
 
 ### Orders (`/api/orders`)
 
-| Method   | Path                  | Access                                              |
-|----------|-----------------------|-----------------------------------------------------|
-| `GET`    | `/`                   | Admin, Staff                                        |
-| `GET`    | `/analytics/summary`  | Admin, Staff (`startDate`, `endDate` query: `YYYY-MM-DD`) |
-| `GET`    | `/:id`                | Admin, Staff                                        |
-| `POST`   | `/`                   | Admin, Staff                                        |
-| `PATCH`  | `/:id/status`         | Admin, Staff                                        |
-| `PUT`    | `/:id`                | Admin                                               |
-| `DELETE` | `/:id`                | Admin                                               |
+| Method   | Path                 | Access                                                    |
+|----------|----------------------|-----------------------------------------------------------|
+| `GET`    | `/`                  | Admin, Staff                                              |
+| `GET`    | `/analytics/summary` | Admin, Staff (`startDate`, `endDate` query: `YYYY-MM-DD`) |
+| `GET`    | `/:id`               | Admin, Staff                                              |
+| `POST`   | `/`                  | Admin, Staff                                              |
+| `PATCH`  | `/:id/status`        | Admin, Staff                                              |
+| `PUT`    | `/:id`               | Admin                                                     |
+| `DELETE` | `/:id`               | Admin                                                     |
 
 ### Notifications (`/api/notifications`)
 
-| Method  | Path         | Access    |
-|---------|--------------|-----------|
-| `GET`   | `/`          | Protected |
-| `PATCH` | `/read-all`  | Protected |
-| `PATCH` | `/:id/read`  | Protected |
+| Method  | Path        | Access    |
+|---------|-------------|-----------|
+| `GET`   | `/`         | Protected |
+| `PATCH` | `/read-all` | Protected |
+| `PATCH` | `/:id/read` | Protected |
 
 ### Static Files
 
