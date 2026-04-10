@@ -1,0 +1,117 @@
+@import "tailwindcss";
+
+@theme {
+  --color-v-page: #0a0a0a;
+  --color-v-elevated: #0f0f0f;
+  --color-v-surface: #141414;
+  --color-v-card: #181818;
+  --color-v-muted: #737373;
+  --color-v-accent: #e1fb15;
+  --color-v-accent-hover: #f0ff4a;
+  --color-v-green: #4ade80;
+  --color-v-chart-muted: #2a2a2a;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --shadow-v-card: 0 16px 48px rgba(0, 0, 0, 0.55);
+  --shadow-v-glow: 0 0 60px rgba(225, 251, 21, 0.08);
+}
+
+@keyframes alert-blink {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(225, 251, 21, 0.45);
+  }
+  50% {
+    opacity: 0.88;
+    box-shadow: 0 0 24px 4px rgba(225, 251, 21, 0.3);
+  }
+}
+
+.animate-alert-blink {
+  animation: alert-blink 1.5s ease-in-out infinite;
+}
+
+:root {
+  font-family: var(--font-sans);
+  color: #fafafa;
+  background: var(--color-v-page);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--color-v-page);
+  background-image:
+    radial-gradient(ellipse 120% 80% at 100% -20%, rgba(225, 251, 21, 0.06), transparent 50%),
+    radial-gradient(ellipse 80% 50% at 0% 100%, rgba(74, 222, 128, 0.04), transparent 45%);
+}
+
+/* Hide native number input spinners when custom +/- controls exist */
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.no-spinner[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* Native <select>: remove OS chrome so border-radius + theme apply consistently */
+@layer components {
+  .v-select {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    width: 100%;
+    max-width: 100%;
+    border-radius: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background-color: var(--color-v-surface);
+    color: #fafafa;
+    padding: 0.625rem 2.5rem 0.625rem 1rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    outline: none;
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
+    cursor: pointer;
+    color-scheme: dark;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23a3a3a3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 1rem;
+  }
+
+  .v-select:hover:not(:disabled) {
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+
+  .v-select:focus {
+    border-color: rgba(225, 251, 21, 0.45);
+    box-shadow: 0 0 0 1px rgba(225, 251, 21, 0.12);
+  }
+
+  .v-select:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .v-select--elevated {
+    background-color: var(--color-v-elevated);
+  }
+
+  .v-select--compact {
+    border-radius: 0.75rem;
+    padding: 0.5rem 2.25rem 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    width: auto;
+    min-width: 8.5rem;
+  }
+}
