@@ -1,32 +1,52 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  AlertTriangle,
-  BellRing,
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
-  Package,
-} from "lucide-react";
+import { AlertTriangle, ChevronDown, Package, X } from "lucide-react";
 import api from "../../services/api";
+import { useAuth } from "../../context/AuthContext";
 
+/** How long "dismiss" hides the banner, unless the low-stock situation changes first. */
+const SNOOZE_MS = 2 * 60 * 60 * 1000;
+const snoozeKey = (storeId) => `vendora_lowstock_snooze_${storeId || "default"}`;
+
+/** Identifies the current low-stock situation, so a change (new item, lower stock) re-shows the banner. */
+const signatureOf = ({ count, items }) =>
+  `${count}|${(items || [])
+    .map((i) => `${i._id}:${i.stockQuantity}`)
+    .sort()
+    .join(",")}`;
+
+const readSnooze = (key) => {
+  try {
+    return JSON.parse(localStorage.getItem(key) || "null");
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Compact low-stock banner shown above page content.
+ * One line by default; the affected products expand on demand. Hidden when stock is healthy.
+ * It can be dismissed, but only for a while: it returns after SNOOZE_MS, or sooner if the
+ * set of low-stock products (or their quantities) changes.
+ */
 const OperationalAlerts = ({ userRole }) => {
+  const { user } = useAuth();
+  const storeKey = snoozeKey(user?.store?._id);
+
   const [payload, setPayload] = useState({ threshold: 10, count: 0, items: [] });
-  const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState(true);
-  const [fetchError, setFetchError] = useState("");
+  const [expanded, setExpanded] = useState(false);
+  const [snooze, setSnooze] = useState(() => readSnooze(storeKey));
+  const [now, setNow] = useState(() => Date.now());
+  const [entered, setEntered] = useState(false);
 
   const load = useCallback(async () => {
-    setFetchError("");
     try {
       const { data } = await api.get("/products/alerts/low-stock");
-      const next = data.data || { threshold: 10, count: 0, items: [] };
-      setPayload(next);
+      setPayload(data.data || { threshold: 10, count: 0, items: [] });
     } catch {
-      setFetchError("Could not load stock alerts.");
-    } finally {
-      setLoading(false);
+      /* non-critical: the banner simply stays hidden */
     }
+    setNow(Date.now());
   }, []);
 
   useEffect(() => {
@@ -35,134 +55,128 @@ const OperationalAlerts = ({ userRole }) => {
     return () => window.clearInterval(id);
   }, [load]);
 
+  useEffect(() => {
+    setSnooze(readSnooze(storeKey));
+  }, [storeKey]);
+
   const { threshold, count, items } = payload;
+  const signature = useMemo(() => signatureOf(payload), [payload]);
+  const snoozed = Boolean(snooze && snooze.signature === signature && snooze.until > now);
+  const visible = count > 0 && !snoozed;
+
+  // Slide in smoothly the first time it has something to show.
+  useEffect(() => {
+    if (!visible) {
+      setEntered(false);
+      return undefined;
+    }
+    const id = window.requestAnimationFrame(() => setEntered(true));
+    return () => window.cancelAnimationFrame(id);
+  }, [visible]);
+
+  const dismiss = () => {
+    const next = { signature, until: Date.now() + SNOOZE_MS };
+    try {
+      localStorage.setItem(storeKey, JSON.stringify(next));
+    } catch {
+      /* storage unavailable: dismiss just lasts for this page view */
+    }
+    setEntered(false);
+    // Let the collapse animation play before unmounting.
+    window.setTimeout(() => {
+      setSnooze(next);
+      setExpanded(false);
+    }, 450);
+  };
+
+  if (!visible) return null;
+
   const isAdmin = userRole === "Admin";
   const remaining = Math.max(0, count - items.length);
 
-  if (loading) {
-    return (
-      <div
-        className="mb-8 animate-pulse rounded-[28px] border border-white/[0.08] bg-v-card p-5 shadow-v-card"
-        aria-hidden
-      >
-        <div className="h-4 w-40 rounded-full bg-white/10" />
-        <div className="mt-3 h-3 w-full max-w-md rounded-full bg-white/[0.06]" />
-      </div>
-    );
-  }
-
-  if (fetchError) {
-    return (
-      <div className="mb-8 rounded-[28px] border border-red-400/35 bg-red-500/10 px-5 py-3.5 text-sm text-red-100 shadow-v-card">
-        {fetchError}
-      </div>
-    );
-  }
-
-  if (count === 0) {
-    return (
-      <div className="mb-8 flex items-center gap-4 rounded-[28px] border border-v-green/25 bg-v-green/10 px-5 py-4 shadow-v-card">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-v-green/20 text-v-green">
-          <CheckCircle2 size={22} strokeWidth={2} />
-        </div>
-        <div>
-          <p className="text-sm font-bold text-white">All clear</p>
-          <p className="text-xs text-white/50">
-            No products below {threshold} units — inventory looks healthy.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="mb-8 overflow-hidden rounded-[28px] border border-amber-400/40 bg-gradient-to-br from-amber-500/15 via-v-card to-v-elevated shadow-[0_0_48px_-8px_rgba(251,191,36,0.25)]">
-      <div className="relative px-5 py-4 sm:px-6 sm:py-5">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(251,191,36,0.14),transparent_55%)]" />
-        <div className="relative flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex gap-3">
-            <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-500/25 text-amber-100 ring-1 ring-amber-400/50">
-              <BellRing size={22} className="text-amber-200" />
-              <span className="animate-alert-blink absolute -right-1.5 -top-1.5 flex h-6 min-w-6 items-center justify-center rounded-full bg-v-accent px-1 text-[10px] font-extrabold text-black ring-2 ring-v-page">
-                {count > 99 ? "99+" : count}
-              </span>
-            </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-base font-semibold tracking-tight text-amber-50">
-                  Low stock alert
-                </h2>
-                <span className="rounded-full border border-amber-400/40 bg-amber-400/15 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-amber-100/90">
-                  Action needed
+    <div
+      className={`grid transition-[grid-template-rows,opacity,margin] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+        entered ? "mb-6 grid-rows-[1fr] opacity-100" : "mb-0 grid-rows-[0fr] opacity-0"
+      }`}
+    >
+      <div className="min-h-0 overflow-hidden">
+        <div
+          role="status"
+          className="overflow-hidden rounded-2xl border border-amber-400/25 bg-gradient-to-r from-amber-400/[0.09] via-amber-400/[0.05] to-transparent"
+        >
+          {/* Phones: message on top, actions underneath. Wider screens: one line. */}
+          <div className="flex items-start gap-3 px-3 py-3 sm:items-center sm:px-4">
+            {/* Animated warning mark: a soft ripple plus an occasional gentle nudge. */}
+            <span className="v-alert-ring relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-400/15 text-amber-300">
+              <AlertTriangle size={17} className="v-alert-icon" />
+            </span>
+            <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <p className="min-w-0 pt-0.5 text-sm text-white/80 sm:flex-1 sm:pt-0">
+                <span className="font-semibold text-amber-200">
+                  {count} product{count === 1 ? "" : "s"} low on stock
                 </span>
-              </div>
-              <p className="mt-1 max-w-xl text-sm text-amber-100/65">
-                {count} product{count === 1 ? "" : "s"} under {threshold} units. Restock before orders
-                outpace availability.
+                <span className="text-white/50"> · below {threshold} units</span>
               </p>
+              <div className="-ml-3 flex items-center gap-1.5 sm:ml-0">
+                <button
+                  type="button"
+                  onClick={() => setExpanded((v) => !v)}
+                  aria-expanded={expanded}
+                  className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-amber-100/80 transition hover:bg-amber-400/10"
+                >
+                  {expanded ? "Hide list" : "View"}
+                  <ChevronDown size={14} className={`transition-transform duration-300 ${expanded ? "rotate-180" : ""}`} />
+                </button>
+                {isAdmin ? (
+                  <Link
+                    to="/inventory?filter=low"
+                    className="inline-flex items-center gap-1.5 rounded-full bg-amber-300 px-3 py-1.5 text-xs font-bold text-black transition hover:bg-amber-200"
+                  >
+                    <Package size={13} /> Restock
+                  </Link>
+                ) : null}
+              </div>
             </div>
-          </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
-            {isAdmin ? (
-              <Link
-                to="/inventory"
-                className="inline-flex items-center gap-2 rounded-full bg-v-accent px-4 py-2.5 text-sm font-bold text-black shadow-v-glow transition hover:bg-v-accent-hover"
-              >
-                <Package size={16} strokeWidth={2.5} />
-                Open inventory
-              </Link>
-            ) : null}
             <button
               type="button"
-              onClick={() => setExpanded((v) => !v)}
-              className="inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-black/30 px-3.5 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-500/15"
-              aria-expanded={expanded}
+              onClick={dismiss}
+              aria-label="Dismiss for 2 hours"
+              title="Dismiss for 2 hours. It comes back sooner if stock changes."
+              className="-mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-amber-100/60 transition hover:bg-amber-400/10 hover:text-amber-100"
             >
-              {expanded ? (
-                <>
-                  Hide list <ChevronUp size={14} />
-                </>
-              ) : (
-                <>
-                  Show items <ChevronDown size={14} />
-                </>
-              )}
+              <X size={16} />
             </button>
           </div>
-        </div>
 
-        {expanded ? (
-          <ul className="relative mt-4 space-y-2 border-t border-amber-400/20 pt-4">
-            {items.map((row) => (
-              <li
-                key={row._id}
-                className="flex items-center justify-between gap-3 rounded-2xl border border-white/[0.08] bg-v-surface/80 px-3 py-2.5 text-sm"
-              >
-                <div className="flex min-w-0 items-center gap-2">
-                  <AlertTriangle
-                    size={16}
-                    className="shrink-0 text-amber-300/90"
-                    aria-hidden
-                  />
-                  <span className="truncate font-medium text-white/90">{row.name}</span>
-                  {row.category ? (
-                    <span className="hidden shrink-0 text-xs text-white/40 sm:inline">
-                      · {row.category}
+          {/* Product list: opens and closes smoothly */}
+          <div
+            className={`grid transition-[grid-template-rows] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+              expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+            }`}
+          >
+            <div className="min-h-0 overflow-hidden">
+              <ul className="grid gap-2 border-t border-amber-400/15 px-3 py-3 sm:grid-cols-2 sm:px-4 lg:grid-cols-3">
+                {items.map((row) => (
+                  <li
+                    key={row._id}
+                    className="flex items-center justify-between gap-3 rounded-xl bg-black/20 px-3 py-2 text-sm"
+                  >
+                    <span className="min-w-0 truncate text-white/85">{row.name}</span>
+                    <span className="shrink-0 text-xs font-semibold tabular-nums text-amber-200">
+                      {row.stockQuantity} left
                     </span>
-                  ) : null}
-                </div>
-                <span className="shrink-0 rounded-lg bg-amber-500/20 px-2 py-1 text-xs font-semibold tabular-nums text-amber-100">
-                  {row.stockQuantity} left
-                </span>
-              </li>
-            ))}
-            {remaining > 0 ? (
-              <li className="px-1 text-center text-xs text-amber-100/50">
-                + {remaining} more not shown — {isAdmin ? "open inventory for the full list." : "ask an admin to review inventory."}
-              </li>
-            ) : null}
-          </ul>
-        ) : null}
+                  </li>
+                ))}
+                {remaining > 0 ? (
+                  <li className="px-1 py-2 text-xs text-white/40">
+                    +{remaining} more{isAdmin ? " in inventory" : ""}
+                  </li>
+                ) : null}
+              </ul>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
