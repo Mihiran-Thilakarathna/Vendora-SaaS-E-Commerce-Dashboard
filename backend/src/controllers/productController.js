@@ -1,8 +1,14 @@
 const Product = require("../models/Product");
 
+/** Fields a client may set on a product. `store` is never taken from the request. */
+const EDITABLE_FIELDS = ["name", "description", "price", "costPrice", "stockQuantity", "category", "imageURL"];
+
+const pickEditable = (body = {}) =>
+  Object.fromEntries(EDITABLE_FIELDS.filter((k) => body[k] !== undefined).map((k) => [k, body[k]]));
+
 const getProducts = async (req, res, next) => {
   try {
-    const products = await Product.find().sort({ createdAt: -1 });
+    const products = await Product.find({ store: req.storeId }).sort({ createdAt: -1 });
     return res.status(200).json({ success: true, count: products.length, data: products });
   } catch (error) {
     next(error);
@@ -13,7 +19,7 @@ const LOW_STOCK_THRESHOLD = 10;
 
 const getLowStockAlerts = async (req, res, next) => {
   try {
-    const filter = { stockQuantity: { $lt: LOW_STOCK_THRESHOLD } };
+    const filter = { store: req.storeId, stockQuantity: { $lt: LOW_STOCK_THRESHOLD } };
     const [count, items] = await Promise.all([
       Product.countDocuments(filter),
       Product.find(filter)
@@ -38,7 +44,7 @@ const getLowStockAlerts = async (req, res, next) => {
 
 const getProductById = async (req, res, next) => {
   try {
-    const product = await Product.findById(req.params.id);
+    const product = await Product.findOne({ _id: req.params.id, store: req.storeId });
     if (!product) {
       return res.status(404).json({ success: false, message: "Product not found." });
     }
@@ -50,16 +56,7 @@ const getProductById = async (req, res, next) => {
 
 const createProduct = async (req, res, next) => {
   try {
-    const { name, description, price, costPrice, stockQuantity, category, imageURL } = req.body;
-    const product = await Product.create({
-      name,
-      description,
-      price,
-      costPrice,
-      stockQuantity,
-      category,
-      imageURL,
-    });
+    const product = await Product.create({ ...pickEditable(req.body), store: req.storeId });
     return res.status(201).json({ success: true, message: "Product created.", data: product });
   } catch (error) {
     next(error);
@@ -68,10 +65,11 @@ const createProduct = async (req, res, next) => {
 
 const updateProduct = async (req, res, next) => {
   try {
-    const product = await Product.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true,
-    });
+    const product = await Product.findOneAndUpdate(
+      { _id: req.params.id, store: req.storeId },
+      pickEditable(req.body),
+      { new: true, runValidators: true }
+    );
     if (!product) {
       return res.status(404).json({ success: false, message: "Product not found." });
     }
@@ -83,7 +81,7 @@ const updateProduct = async (req, res, next) => {
 
 const deleteProduct = async (req, res, next) => {
   try {
-    const product = await Product.findByIdAndDelete(req.params.id);
+    const product = await Product.findOneAndDelete({ _id: req.params.id, store: req.storeId });
     if (!product) {
       return res.status(404).json({ success: false, message: "Product not found." });
     }

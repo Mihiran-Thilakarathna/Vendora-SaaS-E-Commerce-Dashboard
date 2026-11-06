@@ -4,7 +4,7 @@ const { notifyStaffAdmins } = require("../utils/notifyStaffAdmins");
 
 const getOrders = async (req, res, next) => {
   try {
-    const orders = await Order.find()
+    const orders = await Order.find({ store: req.storeId })
       .populate("items.product", "name price category imageURL")
       .populate("createdBy", "name email avatarURL role")
       .sort({ createdAt: -1 });
@@ -50,7 +50,8 @@ const createOrder = async (req, res, next) => {
     }
 
     const productIds = normalizedItems.map((i) => i.product);
-    const products = await Product.find({ _id: { $in: productIds } });
+    // Only products from the caller's own store can be ordered.
+    const products = await Product.find({ _id: { $in: productIds }, store: req.storeId });
     if (products.length !== new Set(productIds).size) {
       return res.status(400).json({ success: false, message: "One or more products were not found." });
     }
@@ -85,7 +86,7 @@ const createOrder = async (req, res, next) => {
     try {
       for (const item of normalizedItems) {
         const updated = await Product.findOneAndUpdate(
-          { _id: item.product, stockQuantity: { $gte: item.quantity } },
+          { _id: item.product, store: req.storeId, stockQuantity: { $gte: item.quantity } },
           { $inc: { stockQuantity: -item.quantity } },
           { new: true }
         );
@@ -102,6 +103,7 @@ const createOrder = async (req, res, next) => {
       }
 
       const order = await Order.create({
+        store: req.storeId,
         customerName,
         items: normalizedItems,
         totalAmount: computedTotal,
@@ -116,6 +118,7 @@ const createOrder = async (req, res, next) => {
 
       const amountLabel = `Rs. ${Number(computedTotal).toLocaleString("en-LK")}`;
       await notifyStaffAdmins({
+        storeId: req.storeId,
         title: "New order",
         message: `${customerName} · ${amountLabel}`,
         type: "order",
@@ -140,7 +143,7 @@ const createOrder = async (req, res, next) => {
 
 const getOrderById = async (req, res, next) => {
   try {
-    const order = await Order.findById(req.params.id)
+    const order = await Order.findOne({ _id: req.params.id, store: req.storeId })
       .populate("items.product", "name price category imageURL")
       .populate("createdBy", "name email avatarURL role");
     if (!order) {
@@ -154,7 +157,13 @@ const getOrderById = async (req, res, next) => {
 
 const updateOrder = async (req, res, next) => {
   try {
-    const order = await Order.findByIdAndUpdate(req.params.id, req.body, {
+    // Line items and totals are fixed once stock is reserved; only these fields can change.
+    const updates = Object.fromEntries(
+      ["customerName", "shippingAddress", "status"]
+        .filter((k) => req.body?.[k] !== undefined)
+        .map((k) => [k, req.body[k]])
+    );
+    const order = await Order.findOneAndUpdate({ _id: req.params.id, store: req.storeId }, updates, {
       new: true,
       runValidators: true,
     });
@@ -175,8 +184,8 @@ const updateOrderStatus = async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Invalid status value." });
     }
 
-    const order = await Order.findByIdAndUpdate(
-      req.params.id,
+    const order = await Order.findOneAndUpdate(
+      { _id: req.params.id, store: req.storeId },
       { status },
       { new: true, runValidators: true }
     )
@@ -188,6 +197,7 @@ const updateOrderStatus = async (req, res, next) => {
     }
 
     await notifyStaffAdmins({
+      storeId: req.storeId,
       title: "Order status updated",
       message: `${order.customerName} → ${status}`,
       type: "order_status",
@@ -206,7 +216,7 @@ const updateOrderStatus = async (req, res, next) => {
 
 const deleteOrder = async (req, res, next) => {
   try {
-    const order = await Order.findByIdAndDelete(req.params.id);
+    const order = await Order.findOneAndDelete({ _id: req.params.id, store: req.storeId });
     if (!order) {
       return res.status(404).json({ success: false, message: "Order not found." });
     }
@@ -276,13 +286,14 @@ const getOrderAnalytics = async (req, res, next) => {
     const prevWindowStart = new Date(windowStart.getTime() - rangeDays * DAY_MS);
 
     const [orders, prevWeekOrders, lowStockCount] = await Promise.all([
-      Order.find({ createdAt: { $gte: windowStart, $lte: windowEnd } })
+      Order.find({ store: req.storeId, createdAt: { $gte: windowStart, $lte: windowEnd } })
         .populate("items.product", "costPrice name price")
         .sort({ createdAt: 1 }),
       Order.find({
+        store: req.storeId,
         createdAt: { $gte: prevWindowStart, $lte: prevWindowEnd },
       }).sort({ createdAt: 1 }),
-      Product.countDocuments({ stockQuantity: { $lt: 10 } }),
+      Product.countDocuments({ store: req.storeId, stockQuantity: { $lt: 10 } }),
     ]);
 
     const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

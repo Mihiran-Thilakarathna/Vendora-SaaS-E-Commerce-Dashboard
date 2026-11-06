@@ -2,6 +2,12 @@ const mongoose = require("mongoose");
 
 const productSchema = new mongoose.Schema(
   {
+    store: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Store",
+      required: true,
+      index: true,
+    },
     name: {
       type: String,
       required: true,
@@ -40,5 +46,7 @@ const productSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+productSchema.index({ store: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Product", productSchema);
