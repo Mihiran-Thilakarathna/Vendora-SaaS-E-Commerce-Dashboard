@@ -3,8 +3,11 @@ const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
 const {
-  register,
+  signup,
   login,
+  demoLogin,
+  googleLogin,
+  authConfig,
   getMe,
   updateProfile,
   changePassword,
@@ -39,8 +42,11 @@ const upload = multer({
   },
 });
 
-router.post("/register", register);
+router.post("/signup", signup);
 router.post("/login", login);
+router.post("/demo", demoLogin);
+router.post("/google", googleLogin);
+router.get("/config", authConfig);
 router.get("/me", protect, getMe);
 router.patch("/profile", protect, updateProfile);
 router.put("/password", protect, changePassword);
