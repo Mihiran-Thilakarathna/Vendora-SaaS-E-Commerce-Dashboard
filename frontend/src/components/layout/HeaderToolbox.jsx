@@ -4,7 +4,6 @@ import { Search, Bell, LogOut, UserRound } from "lucide-react";
 import api from "../../services/api";
 import { useAuth } from "../../context/AuthContext";
 import ConfirmDialog from "./ConfirmDialog";
-import ProfileSettingsModal from "./ProfileSettingsModal";
 
 const ProfileAvatarTrigger = ({ user, open, onClick, circleBtnClass }) => {
   const [imgErr, setImgErr] = useState(false);
@@ -50,7 +49,6 @@ const HeaderToolbox = () => {
   const [searchQ, setSearchQ] = useState("");
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [signOutOpen, setSignOutOpen] = useState(false);
 
   const loadNotifications = useCallback(async () => {
@@ -240,12 +238,12 @@ const HeaderToolbox = () => {
               type="button"
               onClick={() => {
                 setProfileOpen(false);
-                setProfileModalOpen(true);
+                navigate("/profile");
               }}
               className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-white/85 hover:bg-white/[0.05]"
             >
               <UserRound size={17} strokeWidth={2} />
-              Edit profile
+              Profile & settings
             </button>
             <button
               type="button"
@@ -276,7 +274,6 @@ const HeaderToolbox = () => {
         }}
         danger
       />
-      <ProfileSettingsModal open={profileModalOpen} onClose={() => setProfileModalOpen(false)} />
     </div>
   );
 };
