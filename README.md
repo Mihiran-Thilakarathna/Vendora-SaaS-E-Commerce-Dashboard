@@ -127,14 +127,40 @@ Permissions are enforced on the API, not just hidden in the interface.
 ## 🏗️ Architecture
 
 ```mermaid
-flowchart LR
-    client["React SPA<br/>(Vercel)"]
-    api["Express API<br/>(Render)"]
-    db[("MongoDB Atlas")]
+%%{init: {"theme": "base", "themeVariables": {"primaryColor": "#141414", "primaryTextColor": "#fafafa", "primaryBorderColor": "#e1fb15", "lineColor": "#e1fb15", "clusterBkg": "#0d0d0d", "clusterBorder": "#3a3a3a", "titleColor": "#bdbdbd", "edgeLabelBackground": "#1c1c1c"}}}%%
+flowchart TB
+    user(["👤 Visitor"])
 
-    client -- "HTTPS / JSON<br/>Bearer JWT" --> api
-    api -- "Mongoose queries<br/>scoped to the store" --> db
+    subgraph vercel["Vercel"]
+        spa["⚛️ React SPA<br/>Vite · Tailwind · GSAP · Recharts"]
+    end
+
+    subgraph render["Render"]
+        api["🟢 Express API<br/>JWT auth · roles · store scoping"]
+    end
+
+    db[("🍃 MongoDB Atlas<br/>stores · users · products · orders")]
+    google["🔐 Google Identity<br/>optional sign-in"]
+    gha["⏱️ GitHub Actions<br/>keep-alive ping · every 10 min"]
+
+    user -->|"opens the site"| spa
+    spa -->|"HTTPS · JSON · Bearer JWT"| api
+    api -->|"Mongoose · filtered by store"| db
+    spa -.->|"ID token"| google
+    api -.->|"verify token"| google
+    gha -.->|"GET /api/health"| api
+
+    classDef core fill:#141414,stroke:#e1fb15,stroke-width:2px,color:#fafafa
+    classDef data fill:#0f1a0a,stroke:#4ade80,stroke-width:2px,color:#fafafa
+    classDef side fill:#141414,stroke:#6b6b6b,stroke-width:1.5px,color:#d4d4d4
+    class spa,api core
+    class db data
+    class user,google,gha side
+    linkStyle 0,1,2 stroke:#e1fb15,stroke-width:2.5px
+    linkStyle 3,4,5 stroke:#8a8a8a,stroke-width:1.5px,stroke-dasharray:5 4
 ```
+
+Solid lime lines are the main request path; dashed lines are optional or background traffic.
 
 **How tenant isolation works.** The `protect` middleware verifies the JWT, loads the user, checks the token version, and sets `req.storeId` from the user record in the database. It never takes the store from the request. Every controller filters by `req.storeId`, and create and update handlers only accept a whitelist of fields, so a client can't move a record into another store.
 
@@ -148,7 +174,7 @@ Vendora/
 │   ├── uploads/                    # Uploaded avatars (created at runtime, not in Git)
 │   └── src/
 │       ├── app.js                  # Express app and route mounting
-│       ├── server.js               # Connects to MongoDB, runs the tenancy migration, starts the API
+│       ├── server.js               # Starts the API, then connects to MongoDB (with retries) and runs the tenancy migration
 │       ├── controllers/            # auth, store (team), product, order, notification
 │       ├── middleware/             # protect (JWT + store scope), authorize (roles)
 │       ├── models/                 # Store, User, Product, Order, Notification
