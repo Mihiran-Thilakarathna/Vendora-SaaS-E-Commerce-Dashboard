@@ -16,7 +16,9 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     const url = err.config?.url || "";
-    const authPublic = url.includes("/auth/login") || url.includes("/auth/register");
+    const authPublic = ["/auth/login", "/auth/signup", "/auth/demo", "/auth/google"].some((p) =>
+      url.includes(p)
+    );
     if (err.response?.status === 401 && !authPublic) {
       const had = localStorage.getItem("vendora_token");
       if (had) {
