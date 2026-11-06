@@ -421,3 +421,57 @@ body {
     animation: none;
   }
 }
+
+/* ---------- In-app spinner ---------- */
+@keyframes v-spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.v-spinner {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: conic-gradient(
+    from 0deg,
+    rgba(225, 251, 21, 0) 0deg 70deg,
+    rgba(225, 251, 21, 0.18) 90deg,
+    rgba(225, 251, 21, 0.55) 200deg,
+    #e1fb15 350deg,
+    #e1fb15 360deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - var(--v-spinner-w)), #000 calc(100% - var(--v-spinner-w) + 0.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - var(--v-spinner-w)), #000 calc(100% - var(--v-spinner-w) + 0.5px));
+  animation: v-spinner-rotate 0.85s linear infinite;
+}
+/* Rounded head at the bright end of the arc. */
+.v-spinner::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: var(--v-spinner-w);
+  height: var(--v-spinner-w);
+  border-radius: 9999px;
+  background: #e1fb15;
+  transform: translateX(-50%);
+  box-shadow: 0 0 10px rgba(225, 251, 21, 0.55);
+}
+@media (prefers-reduced-motion: reduce) {
+  .v-spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+@keyframes v-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.v-fade-in {
+  animation: v-fade-in 0.2s ease-out both;
+}

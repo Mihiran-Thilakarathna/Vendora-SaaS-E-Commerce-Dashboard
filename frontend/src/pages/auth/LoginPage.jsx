@@ -19,6 +19,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 import { gsap, useGSAP, prefersReducedMotion } from "../../lib/gsap";
 import SpotlightCard from "../../components/reactbits/SpotlightCard";
+import BrandLoader from "../../components/ui/BrandLoader";
 import { useServerStatus, waitForServer, warmUpServer } from "../../services/serverStatus";
 
 const GOOGLE_ENABLED = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID);
@@ -148,6 +149,9 @@ const LoginPage = () => {
     setError("");
     setPending(kind);
     signingIn.current = true;
+    const started = Date.now();
+    // Fetch the dashboard code in parallel, so the switch after sign-in is instant.
+    import("../dashboard/DashboardPage").catch(() => {});
     try {
       // If the API is still waking up, wait for it instead of failing straight away.
       if (!(await waitForServer())) {
@@ -161,6 +165,9 @@ const LoginPage = () => {
         throw unreachable;
       }
       const signedIn = await action();
+      // Let the loading screen register instead of flashing for a split second.
+      const shown = Date.now() - started;
+      if (shown < 500) await new Promise((r) => window.setTimeout(r, 500 - shown));
       toast.success(`Welcome, ${signedIn.name}`, typeof how === "function" ? how(signedIn) : how);
       // Keep this page in history (push, not replace) and tag its entry, so the browser's
       // Back button returns here instead of leaving the site.
@@ -241,11 +248,31 @@ const LoginPage = () => {
   const panelClass = (id) =>
     `flex flex-col [grid-area:1/1] ${tab === id ? "" : "pointer-events-none invisible"}`;
 
+  // Full-screen brand loader while signing in, creating a store or opening a demo.
+  const overlayLabel =
+    serverStatus !== "ready" && pending
+      ? "Starting the server"
+      : pending === "signup"
+        ? "Creating your store"
+        : pending?.startsWith("demo-")
+          ? `Opening the ${pending.slice(5)} demo`
+          : "Signing you in";
+  const authOverlay = pending ? (
+    <div className="v-fade-in fixed inset-0 z-[200]">
+      <BrandLoader
+        fullScreen
+        label={overlayLabel}
+        hint={serverStatus !== "ready" ? "The first visit after a quiet period can take up to a minute." : undefined}
+      />
+    </div>
+  ) : null;
+
   return (
     <div
       ref={rootRef}
       className="relative flex h-[100dvh] flex-col overflow-y-auto overflow-x-hidden bg-v-page font-sans text-white antialiased"
     >
+      {authOverlay}
       {/* ---------- Background: slow drifting light ---------- */}
       <div className="v-aurora fixed" aria-hidden>
         <span className="v-aurora-a" />
