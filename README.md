@@ -126,11 +126,14 @@ Permissions are enforced on the API, not just hidden in the interface.
 
 ## 🏗️ Architecture
 
-```text
-┌──────────────────────┐        HTTPS / JSON        ┌───────────────────────┐        ┌──────────────┐
-│  React SPA (Vercel)  │  ───────────────────────▶  │  Express API (Render) │  ───▶  │ MongoDB Atlas│
-│  Bearer JWT in header│  ◀───────────────────────  │  JWT + role + store   │  ◀───  │              │
-└──────────────────────┘                            └───────────────────────┘        └──────────────┘
+```mermaid
+flowchart LR
+    client["React SPA<br/>(Vercel)"]
+    api["Express API<br/>(Render)"]
+    db[("MongoDB Atlas")]
+
+    client -- "HTTPS / JSON<br/>Bearer JWT" --> api
+    api -- "Mongoose queries<br/>scoped to the store" --> db
 ```
 
 **How tenant isolation works.** The `protect` middleware verifies the JWT, loads the user, checks the token version, and sets `req.storeId` from the user record in the database. It never takes the store from the request. Every controller filters by `req.storeId`, and create and update handlers only accept a whitelist of fields, so a client can't move a record into another store.
