@@ -19,6 +19,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 import { gsap, useGSAP, prefersReducedMotion } from "../../lib/gsap";
 import SpotlightCard from "../../components/reactbits/SpotlightCard";
+import { useServerStatus, waitForServer, warmUpServer } from "../../services/serverStatus";
 
 const GOOGLE_ENABLED = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID);
 const MIN_PASSWORD = 6;
@@ -82,6 +83,12 @@ const LoginPage = () => {
   const [pending, setPending] = useState(null); // "signin" | "signup" | "google" | "demo-Admin" | "demo-Staff"
   const [showPassword, setShowPassword] = useState(false);
 
+  const serverStatus = useServerStatus();
+  // Start waking the API the moment this page opens (free hosting sleeps when idle).
+  useEffect(() => {
+    warmUpServer();
+  }, []);
+
   const setSignin = (key) => (e) => setSigninForm((p) => ({ ...p, [key]: e.target.value }));
   const setSignup = (key) => (e) => setSignupForm((p) => ({ ...p, [key]: e.target.value }));
 
@@ -131,7 +138,7 @@ const LoginPage = () => {
     const offline = err?.request && !err?.response;
     const message =
       err?.response?.data?.message ||
-      (offline ? "Can't reach the server. It may be waking up, so try again in a few seconds." : fallback);
+      (offline ? "The server didn't respond. Please check your connection and try again." : fallback);
     setError(message);
     toast.error(title, message);
   };
@@ -142,6 +149,17 @@ const LoginPage = () => {
     setPending(kind);
     signingIn.current = true;
     try {
+      // If the API is still waking up, wait for it instead of failing straight away.
+      if (!(await waitForServer())) {
+        const unreachable = new Error("Server unavailable");
+        unreachable.response = {
+          data: {
+            message:
+              "The server isn't responding right now. Please try again in a minute.",
+          },
+        };
+        throw unreachable;
+      }
       const signedIn = await action();
       toast.success(`Welcome, ${signedIn.name}`, typeof how === "function" ? how(signedIn) : how);
       // Keep this page in history (push, not replace) and tag its entry, so the browser's
@@ -296,6 +314,32 @@ const LoginPage = () => {
                   No sign-up needed
                 </span>
               </div>
+
+              {serverStatus !== "ready" && serverStatus !== "checking" ? (
+                <div
+                  role="status"
+                  className={`relative mt-3 flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-xs ${
+                    serverStatus === "waking"
+                      ? "border-white/10 bg-white/[0.03] text-white/65"
+                      : "border-amber-400/30 bg-amber-400/[0.07] text-amber-100/85"
+                  }`}
+                >
+                  {serverStatus === "waking" ? (
+                    <Loader2 size={14} className="mt-0.5 shrink-0 animate-spin text-v-accent" />
+                  ) : (
+                    <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-amber-300" />
+                  )}
+                  <span>
+                    {serverStatus === "waking"
+                      ? pending
+                        ? "Starting the server. You'll be signed in automatically in a moment."
+                        : "Starting the server. The first visit after a quiet period can take up to a minute."
+                      : serverStatus === "db-down"
+                        ? "The server is up but can't reach its database yet. It will retry automatically."
+                        : "The server isn't responding right now. Please try again in a minute."}
+                  </span>
+                </div>
+              ) : null}
 
               <div className="relative mt-3 grid grid-cols-2 gap-2.5 sm:mt-4">
                 {DEMO_ROLES.map(({ id, text }) => {

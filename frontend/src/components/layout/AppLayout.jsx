@@ -5,6 +5,7 @@ import { useAuth } from "../../context/AuthContext";
 import { gsap, useGSAP, prefersReducedMotion } from "../../lib/gsap";
 import OperationalAlerts from "../alerts/OperationalAlerts";
 import HeaderToolbox from "./HeaderToolbox";
+import BrandLoader from "../ui/BrandLoader";
 
 const links = [
   { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard, roles: ["Admin", "Staff"] },
@@ -208,11 +209,7 @@ const AppLayout = () => {
             <div ref={contentRef}>
               {showOperationalAlerts ? <OperationalAlerts userRole={user?.role} /> : null}
               <Suspense
-                fallback={
-                  <div className="flex min-h-[50vh] items-center justify-center">
-                    <span className="h-10 w-10 animate-spin rounded-full border-2 border-white/10 border-t-v-accent" aria-label="Loading" />
-                  </div>
-                }
+                fallback={<BrandLoader label="Loading page" />}
               >
                 <Outlet />
               </Suspense>

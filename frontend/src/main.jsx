@@ -7,6 +7,10 @@ import { AuthProvider } from "./context/AuthContext";
 import { ToastProvider } from "./context/ToastContext";
 import "./lib/gsap";
 import "./index.css";
+import { warmUpServer } from "./services/serverStatus";
+
+// Wake the API as early as possible: it sleeps when idle on free hosting.
+warmUpServer();
 
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 

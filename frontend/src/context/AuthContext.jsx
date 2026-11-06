@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import api from "../services/api";
+import { waitForServer } from "../services/serverStatus";
 
 const AuthContext = createContext(null);
 
@@ -25,9 +26,13 @@ export const AuthProvider = ({ children }) => {
         return;
       }
       try {
+        // The API may still be waking up (free hosting sleeps when idle): wait for it, so a
+        // cold start doesn't look like an expired session and sign the visitor out.
+        await waitForServer();
         const { data } = await api.get("/auth/me");
         setUser(data.data);
       } catch {
+        // Expired/invalid session, or the server stayed unreachable even after waiting.
         localStorage.removeItem("vendora_token");
         setToken(null);
         setUser(null);

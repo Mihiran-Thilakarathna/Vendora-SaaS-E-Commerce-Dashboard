@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import ProtectedRoute from "./routes/ProtectedRoute";
 import AppLayout from "./components/layout/AppLayout";
+import BrandLoader from "./components/ui/BrandLoader";
 
 const LoginPage = lazy(() => import("./pages/auth/LoginPage"));
 const DashboardPage = lazy(() => import("./pages/dashboard/DashboardPage"));
@@ -13,11 +14,7 @@ const TeamPage = lazy(() => import("./pages/team/TeamPage"));
 const App = () => {
   return (
     <Suspense
-      fallback={
-        <div className="flex min-h-[60vh] items-center justify-center">
-          <span className="h-10 w-10 animate-spin rounded-full border-2 border-white/10 border-t-v-accent" aria-label="Loading" />
-        </div>
-      }
+      fallback={<BrandLoader label="Loading Vendora" fullScreen />}
     >
       <Routes>
         <Route path="/login" element={<LoginPage />} />

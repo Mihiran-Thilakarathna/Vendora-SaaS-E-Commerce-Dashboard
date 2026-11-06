@@ -8,6 +8,7 @@ const productRoutes = require("./routes/productRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const storeRoutes = require("./routes/storeRoutes");
+const { dbState, isDbConnected } = require("./config/db");
 
 const app = express();
 
@@ -18,8 +19,22 @@ app.use(morgan("dev"));
 // Serve uploaded files (profile avatars, product images, etc.)
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 
+// Always answers, even while the database is still connecting, so hosts and the
+// frontend's warm-up ping can tell "server awake" apart from "database ready".
 app.get("/api/health", (req, res) => {
-  res.json({ success: true, message: "Vendora API is running" });
+  res.set("Cache-Control", "no-store");
+  res.json({ success: true, message: "Vendora API is running", db: dbState() });
+});
+
+// Fail fast with a clear message instead of letting requests hang while the DB is down.
+app.use("/api", (req, res, next) => {
+  if (isDbConnected()) return next();
+  res.set("Retry-After", "10");
+  return res.status(503).json({
+    success: false,
+    code: "DB_UNAVAILABLE",
+    message: "The server is starting up or can't reach its database. Please try again in a moment.",
+  });
 });
 
 app.use("/api/auth", authRoutes);
