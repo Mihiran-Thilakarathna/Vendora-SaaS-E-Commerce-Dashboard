@@ -7,6 +7,7 @@ const authRoutes = require("./routes/authRoutes");
 const productRoutes = require("./routes/productRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
+const storeRoutes = require("./routes/storeRoutes");
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/store", storeRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ success: false, message: "Route not found" });

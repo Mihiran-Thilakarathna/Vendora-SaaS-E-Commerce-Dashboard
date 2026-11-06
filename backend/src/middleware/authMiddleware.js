@@ -30,7 +30,13 @@ const protect = async (req, res, next) => {
       });
     }
 
+    if (!user.store) {
+      return res.status(403).json({ success: false, message: "Your account is not linked to a store." });
+    }
+
     req.user = user;
+    // Every data query must filter on this. It comes from the database, never from the request.
+    req.storeId = user.store;
     next();
   } catch (error) {
     return res

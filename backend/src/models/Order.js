@@ -18,6 +18,12 @@ const orderItemSchema = new mongoose.Schema(
 
 const orderSchema = new mongoose.Schema(
   {
+    store: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Store",
+      required: true,
+      index: true,
+    },
     customerName: {
       type: String,
       required: true,
@@ -54,5 +60,7 @@ const orderSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+orderSchema.index({ store: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Order", orderSchema);

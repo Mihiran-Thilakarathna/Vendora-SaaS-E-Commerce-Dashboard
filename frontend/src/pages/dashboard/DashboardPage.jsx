@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
-  LineChart,
   CartesianGrid,
   Cell,
-  Line,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -15,20 +15,34 @@ import {
   YAxis,
 } from "recharts";
 import {
-  Target,
-  CircleDollarSign,
+  Activity,
+  ArrowDownRight,
   ArrowUpRight,
-  X,
-  SlidersHorizontal,
   CalendarDays,
   ChevronDown,
+  CircleDollarSign,
+  Download,
+  Loader2,
+  Package,
+  PiggyBank,
+  RefreshCw,
+  ShoppingBag,
+  Trophy,
+  TriangleAlert,
 } from "lucide-react";
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
 import api from "../../services/api";
-import { formatCurrencyCompact, formatCurrency } from "../../utils/formatCurrency";
+import { formatCurrency } from "../../utils/formatCurrency";
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
+import { gsap, useGSAP, prefersReducedMotion } from "../../lib/gsap";
+import useStaggerReveal from "../../hooks/useStaggerReveal";
+import SplitText from "../../components/reactbits/SplitText";
+import CountUp from "../../components/reactbits/CountUp";
+import SpotlightCard from "../../components/reactbits/SpotlightCard";
+import Modal from "../../components/ui/Modal";
+import StatusBadge from "../../components/ui/StatusBadge";
+import { formatOrderDate, shortOrderId } from "../../utils/orderStatus";
+import { downloadReportPdf } from "../../utils/reportPdf";
 
 const EMPTY_ANALYTICS = {
   salesTrendData: [],
@@ -47,23 +61,15 @@ const EMPTY_ANALYTICS = {
   periodLabel: "",
 };
 
+const ACCENT = "#e1fb15";
+
 const formatAxisSales = (value) => {
   const n = Number(value);
   if (!Number.isFinite(n)) return "";
-  return n.toLocaleString("en-LK", { maximumFractionDigits: 0 });
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${Math.round(n / 1000)}K`;
+  return String(Math.round(n));
 };
-
-const formatXAxisLabel = (label) => {
-  if (!label) return "";
-  const text = String(label);
-  const parts = text.split(" ");
-  if (parts.length >= 2) {
-    return `${parts[0]} ${parts[1]}`;
-  }
-  return text;
-};
-
-const safeText = (value) => (value === null || value === undefined ? "" : String(value));
 
 const formatDateKeyShort = (dateKey) => {
   if (!dateKey) return "";
@@ -73,48 +79,6 @@ const formatDateKeyShort = (dateKey) => {
   return dt.toLocaleDateString("en-LK", { day: "numeric", month: "short" });
 };
 
-const buildEmptyWeekTrend = () => {
-  const out = [];
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() - 6);
-  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  for (let i = 0; i < 7; i += 1) {
-    const day = new Date(start);
-    day.setDate(start.getDate() + i);
-    const shortWeekday = dayNames[day.getDay()];
-    const label = day.toLocaleDateString("en-LK", {
-      weekday: "short",
-      day: "numeric",
-      month: "short",
-    });
-    const y = day.getFullYear();
-    const m = String(day.getMonth() + 1).padStart(2, "0");
-    const d = String(day.getDate()).padStart(2, "0");
-    out.push({
-      day: shortWeekday,
-      label,
-      dateKey: `${y}-${m}-${d}`,
-      sales: 0,
-    });
-  }
-  return out;
-};
-
-const SalesBarTooltip = ({ active, payload }) => {
-  if (!active || !payload?.length) return null;
-  const row = payload[0].payload;
-  return (
-    <div className="rounded-2xl border border-black/15 bg-v-accent px-4 py-2.5 text-black shadow-xl">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-black/55">{row.label}</p>
-      <p className="text-lg font-bold tabular-nums">{formatCurrency(row.sales)}</p>
-    </div>
-  );
-};
-
-const cardShell =
-  "rounded-[28px] border border-white/[0.08] bg-v-card p-5 shadow-v-card md:p-6";
-
 const dateInputValue = (date) => {
   const d = new Date(date);
   const y = d.getFullYear();
@@ -123,12 +87,34 @@ const dateInputValue = (date) => {
   return `${y}-${m}-${day}`;
 };
 
+const buildEmptyWeekTrend = () => {
+  const out = [];
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - 6);
+  for (let i = 0; i < 7; i += 1) {
+    const day = new Date(start);
+    day.setDate(start.getDate() + i);
+    out.push({
+      label: day.toLocaleDateString("en-LK", { weekday: "short", day: "numeric", month: "short" }),
+      dateKey: dateInputValue(day),
+      sales: 0,
+    });
+  }
+  return out;
+};
+
+const PRESETS = [
+  { id: "today", label: "Today" },
+  { id: "last7", label: "Last 7 days" },
+  { id: "last30", label: "Last 30 days" },
+  { id: "thisMonth", label: "This month" },
+];
+
 const rangeFromPreset = (presetId) => {
   const now = new Date();
   const end = dateInputValue(now);
-  if (presetId === "today") {
-    return { startDate: end, endDate: end, label: "Today" };
-  }
+  if (presetId === "today") return { startDate: end, endDate: end, label: "Today" };
   if (presetId === "last30") {
     const start = new Date(now);
     start.setDate(start.getDate() - 29);
@@ -143,22 +129,100 @@ const rangeFromPreset = (presetId) => {
   return { startDate: dateInputValue(start), endDate: end, label: "Last 7 days" };
 };
 
+const pctOf = (part, total) => (total ? Math.round((Number(part || 0) / total) * 1000) / 10 : 0);
+
+const SalesTooltip = ({ active, payload }) => {
+  if (!active || !payload?.length) return null;
+  const row = payload[0].payload;
+  return (
+    <div className="rounded-2xl border border-black/10 bg-v-accent px-4 py-2.5 text-black shadow-xl">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-black/55">{row.label}</p>
+      <p className="text-lg font-bold tabular-nums">{formatCurrency(row.sales)}</p>
+    </div>
+  );
+};
+
+const card = "rounded-[28px] border border-white/[0.07] bg-v-card p-5 shadow-v-card md:p-6";
+const eyebrow = "text-[11px] font-bold uppercase tracking-[0.14em] text-white/40";
+
+/** Animated progress bar: width tweens with GSAP whenever `value` changes. */
+const Meter = ({ value, color = ACCENT, className = "h-2" }) => {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    const width = `${Math.max(0, Math.min(100, value))}%`;
+    if (prefersReducedMotion()) gsap.set(ref.current, { width });
+    else gsap.to(ref.current, { width, duration: 1.2, ease: "power3.out", delay: 0.2 });
+  }, [value]);
+  return (
+    <div className={`w-full overflow-hidden rounded-full bg-white/[0.06] ${className}`}>
+      <div ref={ref} className="h-full w-0 rounded-full" style={{ background: color }} />
+    </div>
+  );
+};
+
+const GrowthChip = ({ percent, dark = false }) => {
+  if (percent === null || percent === undefined) {
+    return (
+      <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${dark ? "bg-black/10 text-black/60" : "bg-white/[0.06] text-white/45"}`}>
+        No prior data
+      </span>
+    );
+  }
+  const up = percent >= 0;
+  const Icon = up ? ArrowUpRight : ArrowDownRight;
+  const tone = dark
+    ? "bg-black/15 text-black"
+    : up
+      ? "bg-v-green/15 text-v-green"
+      : "bg-red-400/15 text-red-300";
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold ${tone}`}>
+      <Icon size={13} strokeWidth={2.6} />
+      {up ? "+" : ""}
+      {percent}%
+    </span>
+  );
+};
+
+const DashboardSkeleton = () => (
+  <div className="space-y-6" aria-busy="true" aria-label="Loading dashboard">
+    <div className="h-14 w-72 animate-pulse rounded-2xl bg-white/[0.05]" />
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} className="h-40 animate-pulse rounded-[28px] bg-white/[0.04]" />
+      ))}
+    </div>
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <div className="h-80 animate-pulse rounded-[28px] bg-white/[0.04] xl:col-span-2" />
+      <div className="h-80 animate-pulse rounded-[28px] bg-white/[0.04]" />
+    </div>
+  </div>
+);
+
 const DashboardPage = () => {
   const { user } = useAuth();
-  const location = useLocation();
+  const toast = useToast();
+  const rootRef = useRef(null);
+
   const [analytics, setAnalytics] = useState(EMPTY_ANALYTICS);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [reportOpen, setReportOpen] = useState(false);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+  // The report's own range. Opening the dialog starts it at the dashboard's current range.
+  const [reportRange, setReportRange] = useState(() => rangeFromPreset("last7"));
+  const [reportCustom, setReportCustom] = useState(() => rangeFromPreset("last7"));
+  const [reportData, setReportData] = useState(null); // analytics for the chosen report period
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState("");
   const [selectedRange, setSelectedRange] = useState(() => rangeFromPreset("last7"));
   const [customRange, setCustomRange] = useState(() => rangeFromPreset("last7"));
   const [rangePickerOpen, setRangePickerOpen] = useState(false);
-  const [toolsPanelOpen, setToolsPanelOpen] = useState(false);
-  const [pdfOpen, setPdfOpen] = useState(false);
-  const [pdfUrl, setPdfUrl] = useState("");
-  const [pdfFilename, setPdfFilename] = useState("vendora-report.pdf");
-  const [pdfGenerating, setPdfGenerating] = useState(false);
-  const toast = useToast();
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [recentOrders, setRecentOrders] = useState(null); // null = loading
+  const rangeRef = useRef(null);
 
   const isAdmin = user?.role === "Admin";
 
@@ -169,10 +233,7 @@ const DashboardPage = () => {
       try {
         const queryRange = range || selectedRange;
         const { data } = await api.get("/orders/analytics/summary", {
-          params: {
-            startDate: queryRange.startDate,
-            endDate: queryRange.endDate,
-          },
+          params: { startDate: queryRange.startDate, endDate: queryRange.endDate },
         });
         const payload = data.data || {};
         setAnalytics({
@@ -183,6 +244,7 @@ const DashboardPage = () => {
               ? payload.salesTrendData
               : buildEmptyWeekTrend(),
         });
+        setLastUpdated(new Date());
       } catch (err) {
         const message = err?.response?.data?.message || "Failed to load dashboard analytics.";
         setError(message);
@@ -200,125 +262,70 @@ const DashboardPage = () => {
     return () => window.clearInterval(intervalId);
   }, [loadDashboard, selectedRange]);
 
-  useEffect(() => {
-    return () => {
-      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
-    };
-  }, [pdfUrl]);
-
-  const closePdfPreview = () => {
-    setPdfOpen(false);
-    if (pdfUrl) {
-      URL.revokeObjectURL(pdfUrl);
-      setPdfUrl("");
-    }
-  };
-
-  const downloadBlobUrl = (blobUrl, filename) => {
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  };
-
-  const generateReportPdf = async () => {
-    setPdfGenerating(true);
+  const loadRecentOrders = useCallback(async () => {
     try {
-      const reportTitle = `${safeText(selectedRange?.label || "Dashboard")} performance report`;
-      const stamp = new Date().toISOString().slice(0, 10);
-      const filename = `vendora-report-${stamp}.pdf`;
-
-      const doc = new jsPDF({ orientation: "p", unit: "pt", format: "a4" });
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const marginX = 40;
-      let y = 52;
-
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(16);
-      doc.text(reportTitle, marginX, y);
-      y += 18;
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-      doc.setTextColor(90);
-      doc.text(`Generated: ${new Date().toLocaleString()}`, marginX, y);
-      y += 20;
-      doc.setTextColor(0);
-
-      const kpis = [
-        ["Total revenue", formatCurrency(totalRevenue)],
-        ["Prior week", formatCurrency(previousWeekRevenue)],
-        ["Avg order", ordersCount > 0 ? formatCurrency(avgOrderValue) : "—"],
-        ["Low-stock products (<10 units)", safeText(lowStockCount)],
-        ["Orders in range", safeText(ordersCount)],
-      ];
-
-      autoTable(doc, {
-        startY: y,
-        head: [["Metric", "Value"]],
-        body: kpis,
-        styles: { fontSize: 10, cellPadding: 6 },
-        headStyles: { fillColor: [20, 20, 20], textColor: 255 },
-        columnStyles: { 0: { cellWidth: pageWidth * 0.55 }, 1: { cellWidth: pageWidth * 0.35 } },
-        margin: { left: marginX, right: marginX },
-      });
-
-      y = doc.lastAutoTable.finalY + 18;
-
-      if (statusBreakdown?.length) {
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(12);
-        doc.text("Orders by status", marginX, y);
-        y += 8;
-
-        autoTable(doc, {
-          startY: y,
-          head: [["Status", "Count", "Percent"]],
-          body: statusBreakdown.map((s) => {
-            const pct = ordersCount ? Math.round((Number(s.count || 0) / ordersCount) * 1000) / 10 : 0;
-            return [safeText(s.name), safeText(s.count ?? 0), `${pct}%`];
-          }),
-          styles: { fontSize: 10, cellPadding: 6 },
-          headStyles: { fillColor: [235, 252, 21], textColor: 0 },
-          margin: { left: marginX, right: marginX },
-        });
-
-        y = doc.lastAutoTable.finalY + 18;
-      }
-
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(12);
-      doc.text("Order value by day", marginX, y);
-      y += 8;
-
-      autoTable(doc, {
-        startY: y,
-        head: [["Date", "Order value"]],
-        body: (trendRows || []).map((row) => [safeText(row.label), formatCurrency(row.sales || 0)]),
-        styles: { fontSize: 10, cellPadding: 6 },
-        headStyles: { fillColor: [20, 20, 20], textColor: 255 },
-        columnStyles: { 1: { halign: "right" } },
-        margin: { left: marginX, right: marginX },
-      });
-
-      const blob = doc.output("blob");
-      const url = URL.createObjectURL(blob);
-
-      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
-      setPdfUrl(url);
-      setPdfFilename(filename);
-      setPdfOpen(true);
-
-      // Also trigger a proper download immediately
-      downloadBlobUrl(url, filename);
-    } catch (e) {
-      toast.error("PDF failed", e?.message || "Could not generate the report PDF.");
-    } finally {
-      setPdfGenerating(false);
+      const { data } = await api.get("/orders");
+      const list = Array.isArray(data.data) ? data.data : [];
+      setRecentOrders(
+        [...list].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)).slice(0, 6)
+      );
+    } catch {
+      setRecentOrders([]);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadRecentOrders();
+  }, [loadRecentOrders]);
+
+  // Close the date-range popover on outside click or Escape.
+  useEffect(() => {
+    if (!rangePickerOpen) return undefined;
+    const onDown = (e) => {
+      if (rangeRef.current && !rangeRef.current.contains(e.target)) setRangePickerOpen(false);
+    };
+    const onKey = (e) => e.key === "Escape" && setRangePickerOpen(false);
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [rangePickerOpen]);
+
+  // Load data for the report's range whenever the dialog is open and the range changes.
+  useEffect(() => {
+    if (!reportOpen) return undefined;
+    let cancelled = false;
+    const range = reportRange;
+    setReportLoading(true);
+    setReportError("");
+    api
+      .get("/orders/analytics/summary", { params: { startDate: range.startDate, endDate: range.endDate } })
+      .then(({ data }) => {
+        if (cancelled) return;
+        const payload = data.data || {};
+        setReportData({
+          ...EMPTY_ANALYTICS,
+          ...payload,
+          salesTrendData: Array.isArray(payload.salesTrendData) ? payload.salesTrendData : [],
+          range,
+        });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setReportData(null);
+        setReportError(err?.response?.data?.message || "Could not load report data.");
+      })
+      .finally(() => {
+        if (!cancelled) setReportLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reportOpen, reportRange]);
+
+  useStaggerReveal(rootRef, [loading]);
 
   const {
     salesTrendData,
@@ -343,193 +350,193 @@ const DashboardPage = () => {
   );
 
   const salesActivity = useMemo(() => {
-    const rows = Array.isArray(trendRows) ? trendRows : [];
-    const activeDays = rows.filter((row) => Number(row.sales) > 0).length;
-    const peak = rows.reduce(
-      (best, row) => {
-        const sales = Number(row.sales) || 0;
-        if (sales > best.sales) return { label: row.label || "—", sales };
-        return best;
-      },
+    const activeDays = trendRows.filter((row) => Number(row.sales) > 0).length;
+    const peak = trendRows.reduce(
+      (best, row) => (Number(row.sales) > best.sales ? { label: row.label || "—", sales: Number(row.sales) } : best),
       { label: "—", sales: 0 }
     );
     return { activeDays, peakLabel: peak.label, peakSales: peak.sales };
   }, [trendRows]);
 
-  const todayKey = useMemo(() => {
-    const n = new Date();
-    const y = n.getFullYear();
-    const m = String(n.getMonth() + 1).padStart(2, "0");
-    const d = String(n.getDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
-  }, []);
-
-  const currentDayIndex = trendRows.findIndex((row) => row.dateKey === todayKey);
-  const highlightBarIndex = currentDayIndex >= 0 ? currentDayIndex : Math.max(0, trendRows.length - 1);
-
-  const growthLabel =
-    weekOverWeekChangePercent !== null && weekOverWeekChangePercent !== undefined
-      ? `${weekOverWeekChangePercent > 0 ? "+" : ""}${weekOverWeekChangePercent}%`
-      : Number(totalRevenue) > 0 && Number(previousWeekRevenue) === 0
-        ? "New"
-        : "—";
   const statusCounts = useMemo(() => {
     const map = new Map();
-    (statusBreakdown || []).forEach((item) => {
-      map.set(String(item.name || "").toLowerCase(), Number(item.count) || 0);
-    });
+    (statusBreakdown || []).forEach((item) => map.set(String(item.name || "").toLowerCase(), Number(item.count) || 0));
     return map;
   }, [statusBreakdown]);
-  const completedOrders =
-    (statusCounts.get("completed") || 0) + (statusCounts.get("delivered") || 0);
-  const cancelledOrders =
-    (statusCounts.get("cancelled") || 0) + (statusCounts.get("canceled") || 0);
-  const openOrders = Math.max(ordersCount - completedOrders - cancelledOrders, 0);
-  const fulfillmentRate = ordersCount
-    ? Math.round((completedOrders / ordersCount) * 1000) / 10
-    : 0;
-  const isDenseTimeline = trendRows.length > 14;
-  const xAxisInterval = trendRows.length > 21 ? 3 : trendRows.length > 10 ? 1 : 0;
-  const rangeDaysLabel = `${trendRows.length}-day`;
-  const selectedPeriodLabel = selectedRange?.label || `${trendRows.length} days`;
 
-  const subNav = [
-    { label: "Overview", to: "/dashboard", end: true },
-    { label: "Orders", to: "/orders" },
-    ...(isAdmin ? [{ label: "Inventory", to: "/inventory" }] : []),
-  ];
+  const completedOrders = (statusCounts.get("completed") || 0) + (statusCounts.get("delivered") || 0);
+  const cancelledOrders = (statusCounts.get("cancelled") || 0) + (statusCounts.get("canceled") || 0);
+  const openOrders = Math.max(ordersCount - completedOrders - cancelledOrders, 0);
+  const fulfillmentRate = pctOf(completedOrders, ordersCount);
+  const maxSold = Math.max(1, ...topSellingProducts.map((p) => Number(p.quantitySold) || 0));
+  const costShare = totalRevenue > 0 ? Math.min(100, (totalCost / totalRevenue) * 100) : 0;
 
   const applyRange = (nextRange) => {
     setSelectedRange(nextRange);
     setCustomRange(nextRange);
     setRangePickerOpen(false);
-    loadDashboard({ silent: false, range: nextRange });
   };
 
-  if (loading) {
-    return (
-      <div className="flex min-h-[45vh] items-center justify-center">
-        <div
-          className="h-11 w-11 animate-spin rounded-full border-2 border-white/15 border-t-v-accent"
-          aria-hidden
-        />
-      </div>
-    );
-  }
+  const refresh = async () => {
+    setRefreshing(true);
+    await Promise.all([loadDashboard({ silent: true }), loadRecentOrders()]);
+    setRefreshing(false);
+    toast.success("Refreshed", "Latest analytics loaded.");
+  };
+
+  const openReport = () => {
+    setReportRange(selectedRange);
+    setReportCustom(selectedRange);
+    setReportOpen(true);
+  };
+
+  const pickReportRange = (range) => {
+    setReportRange(range);
+    setReportCustom(range);
+  };
+
+  const applyReportCustom = () => {
+    if (!reportCustom.startDate || !reportCustom.endDate) {
+      toast.error("Invalid range", "Please select both start and end dates.");
+      return;
+    }
+    if (reportCustom.endDate < reportCustom.startDate) {
+      toast.error("Invalid range", "End date must be after start date.");
+      return;
+    }
+    pickReportRange({ startDate: reportCustom.startDate, endDate: reportCustom.endDate, label: "Custom range" });
+  };
+
+  const generateReportPdf = async () => {
+    if (!reportData) return;
+    setPdfGenerating(true);
+    try {
+      const filename = await downloadReportPdf({
+        data: reportData,
+        periodName: reportData.range.label,
+        range: reportData.range,
+        storeName: user?.store?.name || "",
+      });
+      toast.success("Report downloaded", filename);
+    } catch (e) {
+      toast.error("PDF failed", e?.message || "Could not generate the report PDF.");
+    } finally {
+      setPdfGenerating(false);
+    }
+  };
+
+  if (loading) return <DashboardSkeleton />;
+
+  const kpis = [
+    {
+      key: "revenue",
+      label: "Total revenue",
+      icon: CircleDollarSign,
+      value: totalRevenue,
+      format: (n) => formatCurrency(Math.round(n)),
+      foot: <GrowthChip percent={weekOverWeekChangePercent} />,
+      sub: `vs ${formatCurrency(previousWeekRevenue)} prior`,
+    },
+    {
+      key: "profit",
+      label: "Net profit",
+      icon: PiggyBank,
+      value: grossProfit,
+      format: (n) => formatCurrency(Math.round(n)),
+      tone: grossProfit >= 0 ? "text-v-green" : "text-red-300",
+      foot: (
+        <span className="rounded-full bg-white/[0.06] px-2.5 py-1 text-[11px] font-bold text-white/70">
+          Margin {grossMarginPercent === null ? "—" : `${grossMarginPercent}%`}
+        </span>
+      ),
+      sub: `Cost coverage ${costCoveragePercent}%`,
+    },
+    {
+      key: "aov",
+      label: "Average order",
+      icon: ShoppingBag,
+      value: avgOrderValue,
+      format: (n) => (ordersCount > 0 ? formatCurrency(Math.round(n)) : "—"),
+      foot: (
+        <span className="rounded-full bg-white/[0.06] px-2.5 py-1 text-[11px] font-bold text-white/70">
+          {salesActivity.activeDays}/{trendRows.length} active days
+        </span>
+      ),
+      sub: `Peak ${formatCurrency(salesActivity.peakSales)}`,
+    },
+  ];
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+    <div ref={rootRef} className="space-y-6">
+      {/* ---------- Header ---------- */}
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 className="text-4xl font-extrabold tracking-tight text-white md:text-5xl lg:text-[52px] lg:leading-[1.05]">
-            Dashboard
+          <h1 className="text-4xl font-extrabold tracking-tight text-white md:text-5xl">
+            <SplitText text="Overview" />
           </h1>
-          <p className="mt-2 max-w-xl truncate whitespace-nowrap text-sm text-white/50 md:text-base">
-            Real-time insights into your revenue, orders, and inventory.
+          <p data-reveal className="mt-2 text-sm text-white/45">
+            {periodLabel || "Revenue, orders and inventory at a glance"}
+            {lastUpdated ? (
+              <span className="ml-2 inline-flex items-center gap-1.5 text-white/35">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-v-green opacity-60" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-v-green" />
+                </span>
+                Live · {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            ) : null}
           </p>
-
-          <nav className="mt-6 flex flex-wrap gap-6 border-b border-white/[0.06] pb-0.5">
-            {subNav.map((tab) => {
-              const active = tab.end
-                ? location.pathname === tab.to
-                : location.pathname.startsWith(tab.to);
-              return (
-                <Link
-                  key={tab.to + tab.label}
-                  to={tab.to}
-                  className={`relative pb-3 text-sm font-semibold transition ${
-                    active ? "text-white" : "text-white/45 hover:text-white/80"
-                  }`}
-                >
-                  {tab.label}
-                  {active ? (
-                    <span className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-v-accent" />
-                  ) : null}
-                </Link>
-              );
-            })}
-          </nav>
         </div>
 
-        <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
-          <div className="relative flex flex-wrap items-center gap-2">
+        <div data-reveal className="flex flex-wrap items-center gap-2">
+          <div ref={rangeRef} className="relative">
             <button
               type="button"
               onClick={() => setRangePickerOpen((v) => !v)}
-              className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-v-surface px-3 py-1.5 text-xs font-medium text-white/80 hover:text-white"
+              aria-expanded={rangePickerOpen}
+              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-v-surface px-4 py-2.5 text-sm font-semibold text-white/85 transition hover:border-white/20"
             >
-              <CalendarDays size={14} />
+              <CalendarDays size={16} className="text-v-accent" />
               {selectedRange.label}
-              <ChevronDown size={13} className={rangePickerOpen ? "rotate-180" : ""} />
-            </button>
-            <button
-              type="button"
-              onClick={() => setToolsPanelOpen((v) => !v)}
-              className={`inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/12 bg-v-surface text-white/55 hover:border-v-accent/35 hover:text-white ${
-                toolsPanelOpen ? "border-v-accent/50 text-v-accent" : ""
-              }`}
-              aria-expanded={toolsPanelOpen}
-              aria-label="Dashboard tools"
-            >
-              <SlidersHorizontal size={17} />
+              <ChevronDown size={14} className={`transition ${rangePickerOpen ? "rotate-180" : ""}`} />
             </button>
             {rangePickerOpen ? (
-              <div className="absolute right-0 top-11 z-40 w-[310px] rounded-2xl border border-white/10 bg-v-card p-3 shadow-2xl">
-                <p className="text-xs font-semibold uppercase tracking-wide text-white/45">Quick ranges</p>
+              <div className="absolute left-0 top-12 z-40 w-[310px] rounded-3xl border border-white/10 bg-v-card p-4 shadow-2xl sm:left-auto sm:right-0">
+                <p className={eyebrow}>Quick ranges</p>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {[
-                    { id: "today", label: "Today" },
-                    { id: "last7", label: "Last 7 days" },
-                    { id: "last30", label: "Last 30 days" },
-                    { id: "thisMonth", label: "This month" },
-                  ].map((preset) => (
+                  {PRESETS.map((preset) => (
                     <button
                       key={preset.id}
                       type="button"
                       onClick={() => applyRange(rangeFromPreset(preset.id))}
-                      className="rounded-full border border-white/12 px-3 py-1.5 text-xs font-semibold text-white/80 hover:bg-white/10"
+                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                        selectedRange.label === preset.label
+                          ? "border-v-accent bg-v-accent text-black"
+                          : "border-white/10 text-white/75 hover:bg-white/10"
+                      }`}
                     >
                       {preset.label}
                     </button>
                   ))}
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <label className="text-[11px] text-white/50">
-                    Start date
-                    <input
-                      type="date"
-                      value={customRange.startDate}
-                      onChange={(e) =>
-                        setCustomRange((prev) => ({
-                          ...prev,
-                          startDate: e.target.value,
-                          label: "Custom range",
-                        }))
-                      }
-                      className="mt-1 w-full rounded-xl border border-white/12 bg-v-surface px-2.5 py-2 text-xs text-white outline-none focus:border-v-accent/45"
-                    />
-                  </label>
-                  <label className="text-[11px] text-white/50">
-                    End date
-                    <input
-                      type="date"
-                      value={customRange.endDate}
-                      onChange={(e) =>
-                        setCustomRange((prev) => ({
-                          ...prev,
-                          endDate: e.target.value,
-                          label: "Custom range",
-                        }))
-                      }
-                      className="mt-1 w-full rounded-xl border border-white/12 bg-v-surface px-2.5 py-2 text-xs text-white outline-none focus:border-v-accent/45"
-                    />
-                  </label>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  {["startDate", "endDate"].map((field) => (
+                    <label key={field} className="text-[11px] text-white/50">
+                      {field === "startDate" ? "Start date" : "End date"}
+                      <input
+                        type="date"
+                        value={customRange[field]}
+                        onChange={(e) => setCustomRange((prev) => ({ ...prev, [field]: e.target.value, label: "Custom range" }))}
+                        className="mt-1 w-full rounded-xl border border-white/10 bg-v-surface px-2.5 py-2 text-xs text-white outline-none [color-scheme:dark] focus:border-v-accent/45"
+                      />
+                    </label>
+                  ))}
                 </div>
-                <div className="mt-3 flex items-center justify-end gap-2">
+                <div className="mt-4 flex justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => setRangePickerOpen(false)}
-                    className="rounded-full border border-white/12 px-3 py-1.5 text-xs font-semibold text-white/70 hover:bg-white/10"
+                    className="rounded-full border border-white/10 px-3.5 py-1.5 text-xs font-semibold text-white/70 hover:bg-white/10"
                   >
                     Cancel
                   </button>
@@ -546,7 +553,7 @@ const DashboardPage = () => {
                       }
                       applyRange({ ...customRange, label: "Custom range" });
                     }}
-                    className="rounded-full bg-v-accent px-3 py-1.5 text-xs font-bold text-black"
+                    className="rounded-full bg-v-accent px-3.5 py-1.5 text-xs font-bold text-black"
                   >
                     Apply
                   </button>
@@ -554,117 +561,150 @@ const DashboardPage = () => {
               </div>
             ) : null}
           </div>
+
           <button
             type="button"
-            onClick={() => setReportOpen(true)}
-            className="inline-flex items-center justify-center gap-2 rounded-full bg-v-accent px-5 py-2.5 text-sm font-bold text-black shadow-v-glow transition hover:bg-v-accent-hover"
+            onClick={refresh}
+            disabled={refreshing}
+            className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-v-surface text-white/70 transition hover:border-v-accent/40 hover:text-v-accent"
+            aria-label="Refresh data"
+            title="Refresh data"
           >
-            Full report
-            <ArrowUpRight size={17} strokeWidth={2.5} />
+            <RefreshCw size={17} className={refreshing ? "animate-spin" : ""} />
+          </button>
+
+          <button
+            type="button"
+            onClick={openReport}
+            className="inline-flex items-center gap-2 rounded-full bg-v-accent px-5 py-2.5 text-sm font-bold text-black shadow-v-glow transition hover:bg-v-accent-hover"
+          >
+            <Download size={16} />
+            Export report
           </button>
         </div>
       </div>
 
-      {toolsPanelOpen ? (
-        <div className="rounded-[20px] border border-white/[0.08] bg-v-surface/90 p-4 shadow-v-card">
-          <p className="text-sm font-bold text-white">Dashboard tools</p>
-          <p className="mt-1 text-xs text-white/50">
-            Analytics use your selected date range. Use refresh to pull latest numbers, or jump to
-            orders / inventory.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                loadDashboard({ silent: false });
-                toast.success("Refreshed", "Latest analytics loaded.");
-              }}
-              className="rounded-full bg-v-accent px-4 py-2 text-xs font-bold text-black"
-            >
-              Refresh data
-            </button>
-            <Link
-              to="/orders"
-              className="inline-flex items-center rounded-full border border-white/15 px-4 py-2 text-xs font-semibold text-white/80 hover:bg-white/5"
-            >
-              Open orders
-            </Link>
-            {isAdmin ? (
-              <Link
-                to="/inventory"
-                className="inline-flex items-center rounded-full border border-white/15 px-4 py-2 text-xs font-semibold text-white/80 hover:bg-white/5"
-              >
-                Open inventory
-              </Link>
-            ) : null}
-          </div>
-        </div>
+      {error ? (
+        <p className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</p>
       ) : null}
 
-      {error ? <p className="text-sm text-red-300">{error}</p> : null}
+      {/* ---------- KPI row ---------- */}
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <SpotlightCard
+          data-reveal
+          spotlightColor="rgba(0,0,0,0.10)"
+          borderColor="rgba(0,0,0,0.25)"
+          className="rounded-[28px] bg-v-accent p-5 text-black shadow-v-glow md:p-6"
+        >
+          <div className="pointer-events-none absolute -right-8 -top-8 h-36 w-36 rounded-full bg-white/40 blur-3xl" />
+          <div className="relative flex items-start justify-between">
+            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-black/55">Orders</p>
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-black/10">
+              <Package size={17} />
+            </span>
+          </div>
+          <p className="relative mt-3 text-5xl font-extrabold">
+            <CountUp value={ordersCount} />
+          </p>
+          <div className="relative mt-4 flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-black/10 px-2.5 py-1 text-[11px] font-bold">{openOrders} open</span>
+            <span className="rounded-full bg-black/10 px-2.5 py-1 text-[11px] font-bold">{completedOrders} delivered</span>
+          </div>
+        </SpotlightCard>
 
-      {/* Top metric strip — Stockify-style row */}
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <article className={cardShell}>
-          <p className="text-xs font-semibold uppercase tracking-wider text-white/45">
-            Total sales
-          </p>
-          <p className="mt-1 text-3xl font-extrabold tabular-nums text-v-accent md:text-4xl">
-            {formatCurrencyCompact(totalRevenue)}
-          </p>
-          <p className="mt-1 text-xs text-white/40">{selectedPeriodLabel} order value</p>
-          <div className="mt-4 h-14 w-full">
+        {kpis.map(({ key, label, icon: Icon, value, format, tone, foot, sub }) => (
+          <SpotlightCard key={key} data-reveal className={card}>
+            <div className="flex items-start justify-between">
+              <p className={eyebrow}>{label}</p>
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/[0.05] text-v-accent">
+                <Icon size={17} />
+              </span>
+            </div>
+            <p className={`mt-3 text-[26px] font-extrabold leading-tight ${tone || "text-white"}`}>
+              <CountUp value={value} format={format} />
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {foot}
+              <span className="text-[11px] text-white/35">{sub}</span>
+            </div>
+          </SpotlightCard>
+        ))}
+      </section>
+
+      {/* ---------- Trend + status ---------- */}
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <SpotlightCard data-reveal className={`${card} xl:col-span-2`}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className={eyebrow}>Sales trend</p>
+              <h2 className="mt-1 text-2xl font-bold text-white">Daily order value</h2>
+            </div>
+            <div className="text-right">
+              <p className="text-[11px] text-white/40">Peak day</p>
+              <p className="text-sm font-bold text-v-accent">
+                {salesActivity.peakSales > 0 ? `${formatDateKeyShort(trendRows.find((r) => r.label === salesActivity.peakLabel)?.dateKey)} · ${formatCurrency(salesActivity.peakSales)}` : "—"}
+              </p>
+            </div>
+          </div>
+          <div className="mt-5 h-[260px] w-full md:h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={trendRows} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
-                <Bar dataKey="sales" radius={[6, 6, 2, 2]} maxBarSize={18}>
-                  {trendRows.map((entry, index) => (
-                    <Cell
-                      key={entry.dateKey || index}
-                      fill={index === highlightBarIndex ? "#e1fb15" : "#2f2f2f"}
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
+              <AreaChart data={trendRows} margin={{ top: 10, right: 8, left: -8, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="salesFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={ACCENT} stopOpacity={0.35} />
+                    <stop offset="100%" stopColor={ACCENT} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="#232323" strokeDasharray="4 6" vertical={false} />
+                <XAxis
+                  dataKey="dateKey"
+                  tickFormatter={formatDateKeyShort}
+                  axisLine={false}
+                  tickLine={false}
+                  minTickGap={18}
+                  tick={{ fill: "#737373", fontSize: 11 }}
+                />
+                <YAxis
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={formatAxisSales}
+                  tick={{ fill: "#737373", fontSize: 11 }}
+                  width={48}
+                />
+                <Tooltip cursor={{ stroke: "#444", strokeDasharray: "4 4" }} content={<SalesTooltip />} />
+                <Area
+                  type="monotone"
+                  dataKey="sales"
+                  stroke={ACCENT}
+                  strokeWidth={2.5}
+                  fill="url(#salesFill)"
+                  dot={trendRows.length <= 14 ? { r: 3, fill: "#0a0a0a", stroke: ACCENT, strokeWidth: 2 } : false}
+                  activeDot={{ r: 6, fill: ACCENT, stroke: "#0a0a0a", strokeWidth: 3 }}
+                  animationDuration={1400}
+                />
+              </AreaChart>
             </ResponsiveContainer>
           </div>
-        </article>
+        </SpotlightCard>
 
-        <article className="relative overflow-hidden rounded-[28px] border border-v-accent/35 bg-v-accent p-5 text-black shadow-v-glow md:p-6">
-          <div className="pointer-events-none absolute -right-6 -top-6 h-32 w-32 rounded-full bg-black/10 blur-2xl" />
-          <p className="text-xs font-bold uppercase tracking-wider text-black/50">Selected period</p>
-          <p className="mt-2 text-4xl font-extrabold tabular-nums md:text-5xl">{ordersCount}</p>
-          <p className="mt-1 text-sm font-semibold text-black/65">Orders in range</p>
-          <div className="mt-4 flex flex-wrap gap-2 border-t border-black/10 pt-4">
-            <span className="rounded-full bg-black/10 px-3 py-1 text-xs font-bold">
-              Avg {ordersCount > 0 ? formatCurrencyCompact(avgOrderValue) : "—"}
-            </span>
-            <span
-              className="rounded-full bg-black/10 px-3 py-1 text-xs font-bold"
-              title="Revenue change vs the previous period of the same length (week-over-week style). “—” means no prior revenue to compare."
-            >
-              Growth {growthLabel}
-            </span>
-          </div>
-        </article>
-
-        <article className={cardShell}>
-          <p className="text-xs font-semibold uppercase tracking-wider text-white/45">
-            Order status
-          </p>
-          <p className="mt-1 text-lg font-bold text-white">Mix this period</p>
-          <div className="mt-2 flex items-center gap-4">
-            <div className="h-[130px] w-[130px] shrink-0">
-              {ordersCount > 0 && statusBreakdown.length ? (
+        <SpotlightCard data-reveal className={card}>
+          <p className={eyebrow}>Order status</p>
+          <h2 className="mt-1 text-2xl font-bold text-white">Pipeline mix</h2>
+          <div className="relative mx-auto mt-4 h-[190px] w-[190px]">
+            {ordersCount > 0 && statusBreakdown.length ? (
+              <>
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
                       data={statusBreakdown}
                       dataKey="count"
                       nameKey="name"
-                      innerRadius={38}
-                      outerRadius={58}
-                      paddingAngle={3}
+                      innerRadius={64}
+                      outerRadius={90}
+                      paddingAngle={4}
+                      cornerRadius={8}
                       stroke="none"
+                      animationDuration={1200}
                     >
                       {statusBreakdown.map((entry) => (
                         <Cell key={entry.name} fill={entry.color} />
@@ -672,472 +712,347 @@ const DashboardPage = () => {
                     </Pie>
                   </PieChart>
                 </ResponsiveContainer>
-              ) : (
-                <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-white/15 text-center text-xs text-white/40">
-                  No data
+                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-3xl font-extrabold text-white">
+                    <CountUp value={ordersCount} />
+                  </span>
+                  <span className="text-[11px] text-white/40">orders</span>
                 </div>
-              )}
-            </div>
-            <ul className="min-w-0 flex-1 space-y-2">
-              {statusBreakdown.length ? (
-                statusBreakdown.slice(0, 4).map((item) => {
-                  const pct = ordersCount
-                    ? Math.round((item.count / ordersCount) * 1000) / 10
-                    : 0;
-                  return (
-                    <li
-                      key={item.name}
-                      className="flex items-center justify-between gap-2 text-xs font-medium"
-                    >
-                      <span className="flex items-center gap-2 truncate text-white/70">
-                        <span
-                          className="h-2 w-2 shrink-0 rounded-full"
-                          style={{ backgroundColor: item.color }}
-                        />
-                        {item.name}
-                      </span>
-                      <span className="shrink-0 tabular-nums text-white">{pct}%</span>
-                    </li>
-                  );
-                })
-              ) : (
-                <li className="text-xs text-white/40">No orders yet.</li>
-              )}
-            </ul>
-          </div>
-        </article>
-      </section>
-
-      <section>
-        <article className={cardShell}>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-white/45">
-                Profitability snapshot
-              </p>
-              <h3 className="mt-1 text-2xl font-bold text-white">Net profit / Gross margin</h3>
-              <p className="mt-1 text-xs text-white/45">
-                Based on product cost prices and quantities in the selected date range.
-              </p>
-            </div>
-            <span className="rounded-full border border-white/12 bg-v-surface px-3 py-1 text-xs font-semibold text-white/80">
-              Margin {grossMarginPercent === null ? "—" : `${grossMarginPercent}%`} · Coverage{" "}
-              {costCoveragePercent}%
-            </span>
-          </div>
-          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div className="rounded-2xl border border-white/[0.08] bg-v-surface px-4 py-3">
-              <p className="text-xs text-white/45">Revenue</p>
-              <p className="mt-1 text-xl font-bold text-v-accent">{formatCurrency(totalRevenue)}</p>
-            </div>
-            <div className="rounded-2xl border border-white/[0.08] bg-v-surface px-4 py-3">
-              <p className="text-xs text-white/45">Estimated cost</p>
-              <p className="mt-1 text-xl font-bold text-white">{formatCurrency(totalCost)}</p>
-            </div>
-            <div className="rounded-2xl border border-white/[0.08] bg-v-surface px-4 py-3">
-              <p className="text-xs text-white/45">Net profit</p>
-              <p
-                className={`mt-1 text-xl font-bold ${
-                  grossProfit >= 0 ? "text-v-green" : "text-red-300"
-                }`}
-              >
-                {formatCurrency(grossProfit)}
-              </p>
-            </div>
-          </div>
-        </article>
-      </section>
-
-      <section>
-        <article className={`${cardShell} h-fit self-start`}>
-          <div className="mb-2 flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-white/45">
-                Sales trends
-              </p>
-              <h2 className="mt-1 text-2xl font-bold text-white md:text-3xl">Daily performance</h2>
-              {periodLabel ? (
-                <p className="mt-1 text-xs text-white/40">{periodLabel}</p>
-              ) : null}
-            </div>
-            <span className="rounded-full border border-v-accent/30 bg-v-accent/10 px-3 py-1 text-xs font-semibold text-v-accent">
-              {rangeDaysLabel} view
-            </span>
-          </div>
-
-          <div className="h-[220px] w-full md:h-[260px] lg:h-[280px]">
-            {isDenseTimeline ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={trendRows} margin={{ top: 8, right: 8, left: 4, bottom: 4 }}>
-                  <CartesianGrid stroke="#2a2a2a" strokeDasharray="4 4" vertical={false} />
-                  <XAxis
-                    dataKey="dateKey"
-                    tickFormatter={formatDateKeyShort}
-                    axisLine={false}
-                    tickLine={false}
-                    interval={xAxisInterval}
-                    minTickGap={14}
-                    tick={{ fill: "#737373", fontSize: 9 }}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tickLine={false}
-                    tickFormatter={formatAxisSales}
-                    tick={{ fill: "#737373", fontSize: 11 }}
-                    width={68}
-                  />
-                  <Tooltip cursor={{ stroke: "#444", strokeWidth: 1 }} content={<SalesBarTooltip />} />
-                  <Line
-                    type="monotone"
-                    dataKey="sales"
-                    stroke="#e1fb15"
-                    strokeWidth={2.5}
-                    dot={false}
-                    activeDot={{ r: 4, fill: "#e1fb15" }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              </>
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={trendRows} barCategoryGap="20%">
-                  <CartesianGrid stroke="#2a2a2a" strokeDasharray="4 4" vertical={false} />
-                  <XAxis
-                    dataKey="label"
-                    tickFormatter={formatXAxisLabel}
-                    axisLine={false}
-                    tickLine={false}
-                    interval={xAxisInterval}
-                    minTickGap={8}
-                    tick={{ fill: "#737373", fontSize: 10 }}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tickLine={false}
-                    tickFormatter={formatAxisSales}
-                    tick={{ fill: "#737373", fontSize: 11 }}
-                    width={68}
-                  />
-                  <Tooltip
-                    cursor={{ fill: "rgba(255,255,255,0.04)" }}
-                    content={<SalesBarTooltip />}
-                  />
-                  <Bar dataKey="sales" radius={[14, 14, 6, 6]} maxBarSize={52}>
-                    {trendRows.map((entry, index) => (
-                      <Cell
-                        key={entry.dateKey || `${entry.label}-${index}`}
-                        fill={index === highlightBarIndex ? "#e1fb15" : "#2f2f2f"}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <div className="flex h-full items-center justify-center rounded-full border border-dashed border-white/15 text-xs text-white/40">
+                No orders yet
+              </div>
             )}
           </div>
-        </article>
+          <ul className="mt-5 space-y-2.5">
+            {statusBreakdown.map((item) => (
+              <li key={item.name} className="flex items-center gap-3 text-sm">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+                <span className="flex-1 text-white/70">{item.name}</span>
+                <span className="font-bold tabular-nums text-white">{item.count}</span>
+                <span className="w-12 text-right text-xs tabular-nums text-white/40">{pctOf(item.count, ordersCount)}%</span>
+              </li>
+            ))}
+          </ul>
+        </SpotlightCard>
       </section>
 
-      <section className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-        <article className={cardShell}>
-            <p className="text-xs font-semibold uppercase tracking-wider text-white/45">
-              Operations
-            </p>
-            <p className="mt-1 text-lg font-bold text-white">Health</p>
-            <div className="mt-4 space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-2xl border border-white/[0.06] bg-v-surface px-3 py-2.5">
-                  <p className="text-[11px] uppercase tracking-wide text-white/45">Fulfillment</p>
-                  <p className="mt-1 text-lg font-bold text-v-green">{fulfillmentRate}%</p>
-                </div>
-                <div className="rounded-2xl border border-white/[0.06] bg-v-surface px-3 py-2.5">
-                  <p className="text-[11px] uppercase tracking-wide text-white/45">Open orders</p>
-                  <p className="mt-1 text-lg font-bold text-white">{openOrders}</p>
-                </div>
-              </div>
-              {statusBreakdown.length ? (
-                statusBreakdown.map((item) => {
-                  const pct = ordersCount
-                    ? Math.round((item.count / ordersCount) * 1000) / 10
-                    : 0;
-                  return (
-                    <div
-                      key={item.name}
-                      className="flex items-center justify-between rounded-2xl border border-white/[0.06] bg-v-surface px-3 py-2.5"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="h-2.5 w-2.5 rounded-full"
-                          style={{ backgroundColor: item.color }}
-                        />
-                        <span className="text-sm text-white/75">{item.name}</span>
-                      </div>
-                      <span className="text-sm font-bold tabular-nums text-white">
-                        {item.count}{" "}
-                        <span className="text-xs font-medium text-white/40">({pct}%)</span>
-                      </span>
-                    </div>
-                  );
-                })
-              ) : (
-                <p className="text-sm text-white/40">No status breakdown.</p>
-              )}
-              <div className="rounded-2xl border border-red-400/25 bg-red-500/10 px-3 py-2.5 text-xs text-red-100">
-                Products currently below 10 units in inventory:{" "}
-                <strong className="text-white">{lowStockCount}</strong>
-              </div>
+      {/* ---------- Products, profitability, health ---------- */}
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+        <SpotlightCard data-reveal className={card}>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className={eyebrow}>Best sellers</p>
+              <h2 className="mt-1 text-xl font-bold text-white">Top products</h2>
             </div>
-        </article>
-        <article className={cardShell}>
-          <p className="text-xs font-semibold uppercase tracking-wider text-white/45">
-            Top selling products
-          </p>
-          <p className="mt-1 text-lg font-bold text-white">Top 3-5 items by units sold</p>
-          <div className="mt-4 space-y-2">
+            <Trophy size={20} className="text-v-accent" />
+          </div>
+          <div className="mt-5 space-y-4">
             {topSellingProducts.length ? (
               topSellingProducts.slice(0, 5).map((item, index) => (
                 <Link
                   key={`${item.productId || item.name}-${index}`}
                   to={`/orders?search=${encodeURIComponent(item.name || "")}`}
-                  className="flex items-center justify-between rounded-2xl border border-white/[0.06] bg-v-surface px-3 py-2.5"
+                  className="group block"
                   title={`View orders containing ${item.name}`}
                 >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-white">{item.name}</p>
-                    <p className="text-xs text-white/45">{formatCurrency(item.revenue || 0)}</p>
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-extrabold ${
+                        index === 0 ? "bg-v-accent text-black" : "bg-white/[0.06] text-white/60"
+                      }`}
+                    >
+                      {index + 1}
+                    </span>
+                    <p className="min-w-0 flex-1 truncate text-sm font-semibold text-white transition group-hover:text-v-accent">
+                      {item.name}
+                    </p>
+                    <span className="text-xs font-bold tabular-nums text-white/70">{item.quantitySold} sold</span>
                   </div>
-                  <span className="rounded-full bg-v-accent/15 px-2.5 py-1 text-xs font-bold text-v-accent">
-                    {item.quantitySold} sold
-                  </span>
+                  <div className="mt-2 flex items-center gap-3 pl-10">
+                    <Meter value={(Number(item.quantitySold) / maxSold) * 100} color={index === 0 ? ACCENT : "#3f3f3f"} className="h-1.5" />
+                    <span className="shrink-0 text-[11px] tabular-nums text-white/40">{formatCurrency(item.revenue || 0)}</span>
+                  </div>
                 </Link>
               ))
             ) : (
               <p className="text-sm text-white/45">No product sales in this period.</p>
             )}
           </div>
-        </article>
-      </section>
+        </SpotlightCard>
 
-      <section className="grid grid-cols-1 gap-5 md:grid-cols-2">
-        <article className={cardShell}>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-white/45">
-                Average order
-              </p>
-              <h3 className="mt-2 text-3xl font-extrabold tabular-nums text-v-accent md:text-4xl">
-                {ordersCount > 0 ? formatCurrencyCompact(avgOrderValue) : "—"}
-              </h3>
-              <p className="mt-2 text-sm text-white/45">
-                {ordersCount > 0 ? `Across ${ordersCount} order(s) in selected range.` : "No orders in this range."}
-              </p>
-            </div>
-            <div className="rounded-2xl bg-v-accent/15 p-3 text-v-accent">
-              <CircleDollarSign size={22} strokeWidth={2} />
-            </div>
-          </div>
-        </article>
-
-        <article className={cardShell}>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-white/45">
-                Sales activity
-              </p>
-              <h3 className="mt-2 text-3xl font-extrabold tabular-nums text-v-green md:text-4xl">
-                {salesActivity.activeDays}/{trendRows.length}
-              </h3>
-              <p className="mt-2 text-sm text-white/45">
-                Active sales days in the current selected window.
-              </p>
-              <p className="mt-3 text-xs text-white/55">
-                Peak day: <span className="font-semibold text-white/80">{salesActivity.peakLabel}</span>{" "}
-                ({formatCurrency(salesActivity.peakSales)})
-              </p>
-            </div>
-            <div className="rounded-2xl bg-v-green/15 p-3 text-v-green">
-              <Target size={22} strokeWidth={2} />
-            </div>
-          </div>
-        </article>
-      </section>
-
-      {reportOpen ? (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="report-title"
-          onClick={() => setReportOpen(false)}
-          onKeyDown={(e) => e.key === "Escape" && setReportOpen(false)}
-        >
-          <div
-            className={`max-h-[90vh] w-full max-w-2xl overflow-y-auto ${cardShell} !shadow-2xl`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-v-accent">
-                  Export-ready
-                </p>
-                <h3 id="report-title" className="mt-1 text-2xl font-extrabold text-white">
-                  {selectedRange.label} performance report
-                </h3>
-                <p className="mt-1 text-sm text-white/50">
-                  Same numbers as the dashboard: daily order totals and status counts from the API.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setReportOpen(false)}
-                className="rounded-full border border-white/15 p-2 text-white/70 transition hover:bg-white/10 hover:text-white"
-                aria-label="Close report"
+        <SpotlightCard data-reveal className={card}>
+          <p className={eyebrow}>Profitability</p>
+          <h2 className="mt-1 text-xl font-bold text-white">Revenue vs cost</h2>
+          <div className="mt-5 h-[150px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={[
+                  { name: "Revenue", value: totalRevenue, fill: ACCENT },
+                  { name: "Cost", value: totalCost, fill: "#3f3f3f" },
+                  { name: "Profit", value: Math.max(grossProfit, 0), fill: "#4ade80" },
+                ]}
+                layout="vertical"
+                margin={{ top: 0, right: 8, left: 0, bottom: 0 }}
+                barCategoryGap={10}
               >
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="mt-6 space-y-6">
-              <div>
-                <h4 className="text-sm font-semibold text-white/80">Order value by day</h4>
-                <div className="mt-2 overflow-hidden rounded-2xl border border-white/[0.08] bg-v-surface">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-white/[0.04] text-xs uppercase tracking-wide text-white/45">
-                      <tr>
-                        <th className="px-3 py-2.5">Date</th>
-                        <th className="px-3 py-2.5 text-right">Order value</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {trendRows.map((row) => (
-                        <tr key={row.dateKey || row.label} className="border-t border-white/[0.06]">
-                          <td className="px-3 py-2.5 text-white">{row.label}</td>
-                          <td className="px-3 py-2.5 text-right font-semibold text-v-accent">
-                            {formatCurrency(row.sales)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-2xl border border-white/[0.08] bg-v-surface p-3">
-                  <p className="text-xs text-white/45">Total revenue ({trendRows.length}d)</p>
-                  <p className="mt-1 font-bold text-v-accent">{formatCurrency(totalRevenue)}</p>
-                </div>
-                <div className="rounded-2xl border border-white/[0.08] bg-v-surface p-3">
-                  <p className="text-xs text-white/45">Prior week</p>
-                  <p className="mt-1 font-bold text-white">{formatCurrency(previousWeekRevenue)}</p>
-                </div>
-                <div className="rounded-2xl border border-white/[0.08] bg-v-surface p-3">
-                  <p className="text-xs text-white/45">Avg order</p>
-                  <p className="mt-1 font-bold text-white">
-                    {ordersCount > 0 ? formatCurrency(avgOrderValue) : "—"}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-white/[0.08] bg-v-surface p-3">
-                  <p className="text-xs text-white/45">Low-stock products (&lt;10 units)</p>
-                  <p className="mt-1 font-bold text-v-green">{lowStockCount}</p>
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-sm font-semibold text-white/80">Orders by status</h4>
-                <ul className="mt-2 space-y-2">
-                  {statusBreakdown.length ? (
-                    statusBreakdown.map((item) => {
-                      const pct = ordersCount
-                        ? Math.round((item.count / ordersCount) * 1000) / 10
-                        : 0;
-                      return (
-                        <li
-                          key={item.name}
-                          className="flex items-center justify-between rounded-2xl border border-white/[0.08] bg-v-surface px-3 py-2 text-sm"
-                        >
-                          <span className="text-white/75">{item.name}</span>
-                          <span className="font-semibold text-white">
-                            {item.count} ({pct}%)
-                          </span>
-                        </li>
-                      );
-                    })
-                  ) : (
-                    <li className="rounded-2xl border border-white/[0.08] bg-v-surface px-3 py-2 text-sm text-white/45">
-                      No orders in period.
-                    </li>
-                  )}
-                </ul>
-              </div>
-              
-              <div className="mt-8">
-                <button
-                  type="button"
-                  onClick={generateReportPdf}
-                  disabled={pdfGenerating}
-                  className="w-full rounded-xl bg-v-accent px-6 py-3 text-sm font-bold text-black shadow-v-glow transition hover:bg-v-accent-hover"
-                >
-                  {pdfGenerating ? "Generating…" : "Download full report"}
-                </button>
-              </div>
-            </div>
+                <XAxis type="number" hide />
+                <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} width={62} tick={{ fill: "#a3a3a3", fontSize: 12 }} />
+                <Tooltip
+                  cursor={{ fill: "rgba(255,255,255,0.03)" }}
+                  formatter={(v) => formatCurrency(v)}
+                  contentStyle={{ background: "#181818", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14, color: "#fff" }}
+                  itemStyle={{ color: "#fff" }}
+                  labelStyle={{ color: "#a3a3a3" }}
+                />
+                <Bar dataKey="value" radius={[6, 10, 10, 6]} animationDuration={1200}>
+                  {["Revenue", "Cost", "Profit"].map((n, i) => (
+                    <Cell key={n} fill={[ACCENT, "#3f3f3f", "#4ade80"][i]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
-        </div>
-      ) : null}
+          <div className="mt-4">
+            <div className="mb-1.5 flex justify-between text-[11px] text-white/45">
+              <span>Cost share of revenue</span>
+              <span className="tabular-nums">{Math.round(costShare)}%</span>
+            </div>
+            <Meter value={costShare} color="linear-gradient(90deg,#e1fb15,#4ade80)" />
+          </div>
+        </SpotlightCard>
 
-      {pdfOpen ? (
-        <div
-          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="pdf-title"
-          onClick={closePdfPreview}
-          onKeyDown={(e) => e.key === "Escape" && closePdfPreview()}
-        >
-          <div
-            className={`max-h-[90vh] w-full max-w-4xl overflow-hidden ${cardShell} !shadow-2xl`}
-            onClick={(e) => e.stopPropagation()}
+        <SpotlightCard data-reveal className={`${card} lg:col-span-2 xl:col-span-1`}>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className={eyebrow}>Operations</p>
+              <h2 className="mt-1 text-xl font-bold text-white">Health check</h2>
+            </div>
+            <Activity size={20} className="text-v-green" />
+          </div>
+          <div className="mt-5 space-y-5">
+            <div>
+              <div className="mb-1.5 flex items-end justify-between">
+                <span className="text-sm text-white/60">Fulfillment rate</span>
+                <span className="text-2xl font-extrabold text-v-green">
+                  <CountUp value={fulfillmentRate} format={(n) => `${n.toFixed(1)}%`} />
+                </span>
+              </div>
+              <Meter value={fulfillmentRate} color="#4ade80" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-2xl border border-white/[0.06] bg-v-surface p-3.5">
+                <p className="text-[11px] uppercase tracking-wide text-white/40">Open orders</p>
+                <p className="mt-1 text-2xl font-extrabold text-white">
+                  <CountUp value={openOrders} />
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/[0.06] bg-v-surface p-3.5">
+                <p className="text-[11px] uppercase tracking-wide text-white/40">Active days</p>
+                <p className="mt-1 text-2xl font-extrabold text-white">
+                  {salesActivity.activeDays}
+                  <span className="text-sm text-white/35">/{trendRows.length}</span>
+                </p>
+              </div>
+            </div>
+            <Link
+              to={isAdmin ? "/inventory" : "/orders"}
+              className={`flex items-center gap-3 rounded-2xl border px-4 py-3 transition ${
+                lowStockCount > 0
+                  ? "border-amber-400/35 bg-amber-400/[0.08] hover:bg-amber-400/[0.12]"
+                  : "border-v-green/25 bg-v-green/[0.06]"
+              }`}
+            >
+              <TriangleAlert size={18} className={lowStockCount > 0 ? "text-amber-300" : "text-v-green"} />
+              <span className="flex-1 text-sm text-white/75">
+                {lowStockCount > 0 ? (
+                  <>
+                    <strong className="text-white">{lowStockCount}</strong> product{lowStockCount === 1 ? "" : "s"} below 10 units
+                  </>
+                ) : (
+                  "Stock levels look healthy"
+                )}
+              </span>
+              <ArrowUpRight size={16} className="text-white/40" />
+            </Link>
+          </div>
+        </SpotlightCard>
+      </section>
+
+      {/* ---------- Recent orders ---------- */}
+      <SpotlightCard data-reveal className={card}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className={eyebrow}>Activity</p>
+            <h2 className="mt-1 text-xl font-bold text-white">Recent orders</h2>
+          </div>
+          <Link
+            to="/orders"
+            className="inline-flex items-center gap-1 rounded-full border border-white/10 px-3.5 py-1.5 text-xs font-semibold text-white/70 transition hover:border-white/20 hover:text-white"
           >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-v-accent">Preview</p>
-                <h3 id="pdf-title" className="mt-1 text-2xl font-extrabold text-white">
-                  Report PDF
-                </h3>
-                <p className="mt-1 text-sm text-white/50">{pdfFilename}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                {pdfUrl ? (
-                  <button
-                    type="button"
-                    onClick={() => downloadBlobUrl(pdfUrl, pdfFilename)}
-                    className="rounded-full bg-v-accent px-4 py-2 text-xs font-extrabold text-black shadow-v-glow transition hover:bg-v-accent-hover"
-                  >
-                    Download
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={closePdfPreview}
-                  className="rounded-full border border-white/15 p-2 text-white/70 transition hover:bg-white/10 hover:text-white"
-                  aria-label="Close PDF preview"
-                >
-                  <X size={20} />
-                </button>
-              </div>
+            View all <ArrowUpRight size={14} />
+          </Link>
+        </div>
+        <div className="mt-4 overflow-x-auto">
+          {recentOrders === null ? (
+            <div className="space-y-2">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="h-12 animate-pulse rounded-xl bg-white/[0.04]" />
+              ))}
+            </div>
+          ) : recentOrders.length ? (
+            <table className="w-full min-w-[560px] text-left text-sm">
+              <thead className="text-[11px] uppercase tracking-wider text-white/35">
+                <tr>
+                  <th className="pb-2 font-semibold">Order</th>
+                  <th className="pb-2 font-semibold">Customer</th>
+                  <th className="pb-2 font-semibold">Date</th>
+                  <th className="pb-2 font-semibold">Status</th>
+                  <th className="pb-2 text-right font-semibold">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentOrders.map((order) => (
+                  <tr key={order._id} className="border-t border-white/[0.05]">
+                    <td className="py-3 font-mono text-xs text-white/50">{shortOrderId(order._id)}</td>
+                    <td className="py-3 font-medium text-white">{order.customerName}</td>
+                    <td className="py-3 text-white/55">{formatOrderDate(order.createdAt)}</td>
+                    <td className="py-3">
+                      <StatusBadge status={order.status} />
+                    </td>
+                    <td className="py-3 text-right font-semibold tabular-nums text-white">
+                      {formatCurrency(order.totalAmount)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="py-6 text-center text-sm text-white/45">No orders yet.</p>
+          )}
+        </div>
+      </SpotlightCard>
+
+      {/* ---------- Report modal ---------- */}
+      <Modal
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        eyebrow="Export report"
+        title={`${reportRange.label} performance report`}
+        description={
+          reportData?.range
+            ? `${formatDateKeyShort(reportData.range.startDate)} to ${formatDateKeyShort(reportData.range.endDate)}`
+            : "Choose a period for the report"
+        }
+        size="lg"
+        footer={
+          <button
+            type="button"
+            onClick={generateReportPdf}
+            disabled={pdfGenerating || reportLoading || !reportData}
+            className="flex w-full items-center justify-center gap-2 rounded-full bg-v-accent px-6 py-3 text-sm font-bold text-black shadow-v-glow transition hover:bg-v-accent-hover disabled:opacity-60"
+          >
+            {pdfGenerating ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+            {pdfGenerating ? "Generating…" : "Download PDF report"}
+          </button>
+        }
+      >
+        {/* Report period: same options as the dashboard's range picker */}
+        <p className={eyebrow}>Report period</p>
+        <div role="radiogroup" aria-label="Report period" className="mt-2 flex flex-wrap gap-2">
+          {PRESETS.map((preset) => {
+            const selected = reportRange.label === preset.label;
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => pickReportRange(rangeFromPreset(preset.id))}
+                className={`rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+                  selected ? "border-v-accent bg-v-accent text-black" : "border-white/10 text-white/75 hover:bg-white/10"
+                }`}
+              >
+                {preset.label}
+              </button>
+            );
+          })}
+          {reportRange.label === "Custom range" ? (
+            <span className="rounded-full border border-v-accent bg-v-accent px-3.5 py-1.5 text-xs font-semibold text-black">
+              Custom range
+            </span>
+          ) : null}
+        </div>
+        <div className="mt-3 grid grid-cols-2 items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
+          {["startDate", "endDate"].map((field) => (
+            <label key={field} className="min-w-0 text-[11px] text-white/50">
+              {field === "startDate" ? "Start date" : "End date"}
+              <input
+                type="date"
+                value={reportCustom[field]}
+                onChange={(e) => setReportCustom((prev) => ({ ...prev, [field]: e.target.value }))}
+                className="mt-1 w-full min-w-0 rounded-xl border border-white/10 bg-v-surface px-2.5 py-2 text-xs text-white outline-none [color-scheme:dark] focus:border-v-accent/45"
+              />
+            </label>
+          ))}
+          <button
+            type="button"
+            onClick={applyReportCustom}
+            className="col-span-2 rounded-xl border border-white/15 px-4 py-2 text-xs font-bold text-white transition hover:border-v-accent/50 hover:text-v-accent sm:col-span-1"
+          >
+            Use these dates
+          </button>
+        </div>
+
+        {reportLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 size={24} className="animate-spin text-white/40" aria-label="Loading report" />
+          </div>
+        ) : reportError ? (
+          <p className="mt-6 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {reportError}
+          </p>
+        ) : reportData ? (
+          <>
+            <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {[
+                ["Revenue", formatCurrency(reportData.totalRevenue), "text-v-accent"],
+                ["Orders", String(reportData.ordersCount), "text-white"],
+                ["Net profit", formatCurrency(reportData.grossProfit), "text-v-green"],
+                ["Low stock", String(reportData.lowStockCount), "text-amber-300"],
+              ].map(([k, v, tone]) => (
+                <div key={k} className="rounded-2xl border border-white/[0.08] bg-v-surface p-3">
+                  <p className="text-xs text-white/45">{k}</p>
+                  <p className={`mt-1 truncate font-bold ${tone}`}>{v}</p>
+                </div>
+              ))}
             </div>
 
-            <div className="mt-4 h-[72vh] overflow-hidden rounded-2xl border border-white/10 bg-white">
-              {pdfUrl ? (
-                <iframe title="Report PDF" src={pdfUrl} className="h-full w-full" />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center text-sm text-black/60">
-                  PDF preview not available.
-                </div>
-              )}
+            <h4 className="mt-6 text-sm font-semibold text-white/80">Order value by day</h4>
+            <div className="mt-2 max-h-72 overflow-y-auto rounded-2xl border border-white/[0.08]">
+              <table className="w-full text-left text-sm">
+                <thead className="sticky top-0 bg-[#1c1c1c] text-xs uppercase tracking-wide text-white/45">
+                  <tr>
+                    <th className="px-3 py-2.5 font-semibold">Date</th>
+                    <th className="px-3 py-2.5 text-right font-semibold">Order value</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-v-surface">
+                  {reportData.salesTrendData.map((row) => (
+                    <tr key={row.dateKey || row.label} className="border-t border-white/[0.06]">
+                      <td className="px-3 py-2.5 text-white">{row.label}</td>
+                      <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-v-accent">
+                        {formatCurrency(row.sales)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </div>
-        </div>
-      ) : null}
+          </>
+        ) : null}
+      </Modal>
     </div>
   );
 };

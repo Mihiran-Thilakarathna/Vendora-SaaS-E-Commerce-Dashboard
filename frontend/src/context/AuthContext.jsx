@@ -39,13 +39,35 @@ export const AuthProvider = ({ children }) => {
     bootstrap();
   }, [token]);
 
-  const login = async (email, password) => {
-    const { data } = await api.post("/auth/login", { email, password });
+  const startSession = (data) => {
     const authToken = data.data.token;
     localStorage.setItem("vendora_token", authToken);
     setToken(authToken);
     setUser(data.data.user);
     return data.data.user;
+  };
+
+  const login = async (email, password) => {
+    const { data } = await api.post("/auth/login", { email, password });
+    return startSession(data);
+  };
+
+  /** Create a new store; the caller becomes its Admin and is signed straight in. */
+  const signup = async ({ name, email, password, storeName }) => {
+    const { data } = await api.post("/auth/signup", { name, email, password, storeName });
+    return startSession(data);
+  };
+
+  /** One-click sign-in to the shared demo account for `role` ("Admin" | "Staff"). */
+  const demoLogin = async (role) => {
+    const { data } = await api.post("/auth/demo", { role });
+    return startSession(data);
+  };
+
+  /** Exchange a Google Identity Services credential (ID token) for a Vendora session. */
+  const googleLogin = async (credential) => {
+    const { data } = await api.post("/auth/google", { credential });
+    return startSession(data);
   };
 
   const logout = () => {
@@ -61,6 +83,9 @@ export const AuthProvider = ({ children }) => {
       isLoading,
       isAuthenticated: Boolean(token),
       login,
+      signup,
+      demoLogin,
+      googleLogin,
       logout,
       applySession,
     }),

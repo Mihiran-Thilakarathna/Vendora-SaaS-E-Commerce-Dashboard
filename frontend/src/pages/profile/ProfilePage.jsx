@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
+import SplitText from "../../components/reactbits/SplitText";
+import useStaggerReveal from "../../hooks/useStaggerReveal";
 import { Eye, EyeOff, ImagePlus, Save, UserRound } from "lucide-react";
 import api from "../../services/api";
 import { useAuth } from "../../context/AuthContext";
@@ -158,20 +160,26 @@ const ProfilePage = () => {
     }
   };
 
+  const pageRef = useRef(null);
+  useStaggerReveal(pageRef, [], { y: 20, stagger: 0.05 });
+
   return (
-    <div className="space-y-8">
+    <div ref={pageRef} className="space-y-8">
       <div>
-        <h2 className="text-4xl font-extrabold tracking-tight text-white md:text-5xl">Profile</h2>
+        <h1 className="text-4xl font-extrabold tracking-tight text-white md:text-5xl">
+            <SplitText text="Profile" />
+          </h1>
         <p className="mt-2 text-sm text-white/50 md:text-base">
           Signed in as <span className="font-semibold text-v-accent">{user?.role}</span> · {user?.email}
         </p>
       </div>
 
       <form
+        data-reveal
         onSubmit={saveProfile}
         className="rounded-[28px] border border-white/[0.08] bg-v-card p-6 shadow-v-card"
       >
-        <div className="grid gap-6 md:grid-cols-[180px,1fr]">
+        <div className="grid gap-6 md:grid-cols-[180px_1fr]">
           <div className="space-y-3">
             <div className="h-40 w-40 overflow-hidden rounded-3xl border border-white/10 bg-v-surface">
               {avatarPreview && !avatarLoadError ? (
@@ -272,7 +280,12 @@ const ProfilePage = () => {
         </div>
       </form>
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      {user?.isDemo ? (
+        <p className="rounded-2xl border border-v-accent/30 bg-v-accent/10 px-4 py-3 text-sm text-white/80">
+          You're using a shared demo account, so email and password changes are locked.
+        </p>
+      ) : null}
+      <fieldset data-reveal disabled={Boolean(user?.isDemo)} className="grid gap-5 disabled:opacity-50 lg:grid-cols-2">
         <form
           onSubmit={changeEmail}
           className="rounded-[28px] border border-white/[0.08] bg-v-card p-6 shadow-v-card"
@@ -348,7 +361,7 @@ const ProfilePage = () => {
             </button>
           </div>
         </form>
-      </div>
+      </fieldset>
     </div>
   );
 };

@@ -2,6 +2,12 @@ const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema(
   {
+    store: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Store",
+      required: true,
+      index: true,
+    },
     name: {
       type: String,
       required: true,
@@ -43,6 +49,16 @@ const userSchema = new mongoose.Schema(
     tokenVersion: {
       type: Number,
       default: 0,
+    },
+    authProvider: {
+      type: String,
+      enum: ["local", "google"],
+      default: "local",
+    },
+    googleId: {
+      type: String,
+      default: "",
+      select: false,
     },
   },
   { timestamps: true }

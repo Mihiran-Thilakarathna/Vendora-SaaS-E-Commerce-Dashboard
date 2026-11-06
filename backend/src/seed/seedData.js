@@ -5,6 +5,8 @@ const bcrypt = require("bcryptjs");
 const User = require("../models/User");
 const Product = require("../models/Product");
 const Order = require("../models/Order");
+const Store = require("../models/Store");
+const Notification = require("../models/Notification");
 
 const connectDB = async () => {
   try {
@@ -121,7 +123,7 @@ const productsData = [
   },
 ];
 
-const createOrders = (products) => {
+const createOrders = (products, storeId) => {
   const orderAItems = [
     { product: products[0]._id, quantity: 2 },
     { product: products[4]._id, quantity: 3 },
@@ -146,6 +148,7 @@ const createOrders = (products) => {
 
   return [
     {
+      store: storeId,
       customerName: "Kasun Perera",
       items: orderAItems,
       totalAmount: calcTotal(orderAItems), // Rs. 35,500
@@ -153,6 +156,7 @@ const createOrders = (products) => {
       shippingAddress: "No. 14, Lake Road, Colombo 08",
     },
     {
+      store: storeId,
       customerName: "Dinithi Fernando",
       items: orderBItems,
       totalAmount: calcTotal(orderBItems), // Rs. 38,300
@@ -160,6 +164,7 @@ const createOrders = (products) => {
       shippingAddress: "No. 88, Galle Road, Dehiwala",
     },
     {
+      store: storeId,
       customerName: "Nimal Jayasinghe",
       items: orderCItems,
       totalAmount: calcTotal(orderCItems), // Rs. 49,200
@@ -169,47 +174,90 @@ const createOrders = (products) => {
   ];
 };
 
-const seed = async () => {
-  await connectDB();
+/**
+ * Demo account credentials. Emails match the API's DEMO_*_EMAIL settings. Passwords come from
+ * DEMO_ADMIN_PASSWORD / DEMO_STAFF_PASSWORD; the fallbacks are for local development only and
+ * are publicly known, so always set your own in production.
+ */
+const DEMO_CREDENTIALS = {
+  admin: {
+    email: (process.env.DEMO_ADMIN_EMAIL || "admin@vendora.com").toLowerCase(),
+    password: process.env.DEMO_ADMIN_PASSWORD || "Admin@123",
+  },
+  staff: {
+    email: (process.env.DEMO_STAFF_EMAIL || "staff@vendora.com").toLowerCase(),
+    password: process.env.DEMO_STAFF_PASSWORD || "Staff@123",
+  },
+};
 
-  try {
-    await Promise.all([User.deleteMany({}), Product.deleteMany({}), Order.deleteMany({})]);
+/**
+ * Resets only the shared demo store (its two demo accounts, products and orders) on the
+ * current mongoose connection. Stores that real users signed up for are left untouched.
+ * Records from before multi-tenancy (no `store` at all) are treated as old demo data.
+ */
+const seedDatabase = async () => {
+    const demoStoreIds = (await Store.find({ isDemo: true }).select("_id").lean()).map((s) => s._id);
+    const demoData = { $or: [{ store: { $in: demoStoreIds } }, { store: { $exists: false } }] };
+    await Promise.all([
+      Store.deleteMany({ _id: { $in: demoStoreIds } }),
+      User.deleteMany({ $or: [...demoData.$or, { email: { $in: [DEMO_CREDENTIALS.admin.email, DEMO_CREDENTIALS.staff.email] } }] }),
+      Product.deleteMany(demoData),
+      Order.deleteMany(demoData),
+      Notification.deleteMany(demoData),
+    ]);
     // eslint-disable-next-line no-console
-    console.log("Existing data cleared.");
+    console.log("Demo store cleared.");
 
-    const adminPassword = await bcrypt.hash("Admin@123", 10);
-    const staffPassword = await bcrypt.hash("Staff@123", 10);
+    const adminPassword = await bcrypt.hash(DEMO_CREDENTIALS.admin.password, 10);
+    const staffPassword = await bcrypt.hash(DEMO_CREDENTIALS.staff.password, 10);
+
+    const adminId = new mongoose.Types.ObjectId();
+    const store = await Store.create({ name: "Vendora Demo Store", owner: adminId, isDemo: true });
 
     const users = await User.insertMany([
       {
+        _id: adminId,
+        store: store._id,
         name: "Vendora Admin",
-        email: "admin@vendora.com",
+        email: DEMO_CREDENTIALS.admin.email,
         password: adminPassword,
         role: "Admin",
         tokenVersion: 0,
       },
       {
+        store: store._id,
         name: "Order Staff",
-        email: "staff@vendora.com",
+        email: DEMO_CREDENTIALS.staff.email,
         password: staffPassword,
         role: "Staff",
         tokenVersion: 0,
       },
     ]);
 
-    const products = await Product.insertMany(productsData);
-    const orders = await Order.insertMany(createOrders(products));
+    const products = await Product.insertMany(productsData.map((p) => ({ ...p, store: store._id })));
+    const orders = await Order.insertMany(createOrders(products, store._id));
 
     // eslint-disable-next-line no-console
     console.log("Seed completed successfully.");
     // eslint-disable-next-line no-console
     console.log(`Users: ${users.length}, Products: ${products.length}, Orders: ${orders.length}`);
+    const usingDefaults = !process.env.DEMO_ADMIN_PASSWORD || !process.env.DEMO_STAFF_PASSWORD;
     // eslint-disable-next-line no-console
-    console.log("Login credentials:");
-    // eslint-disable-next-line no-console
-    console.log("Admin -> admin@vendora.com / Admin@123");
-    // eslint-disable-next-line no-console
-    console.log("Staff -> staff@vendora.com / Staff@123");
+    console.log(`Demo accounts: ${DEMO_CREDENTIALS.admin.email} (Admin), ${DEMO_CREDENTIALS.staff.email} (Staff)`);
+    if (usingDefaults) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "Using the default demo passwords (Admin@123 / Staff@123). Set DEMO_ADMIN_PASSWORD and DEMO_STAFF_PASSWORD before seeding a production database."
+      );
+    }
+    return { store, users, products, orders };
+};
+
+const seed = async () => {
+  await connectDB();
+
+  try {
+    await seedDatabase();
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("Seeding failed:", error.message);
@@ -220,4 +268,8 @@ const seed = async () => {
   }
 };
 
-seed();
+if (require.main === module) {
+  seed();
+}
+
+module.exports = { seedDatabase };
