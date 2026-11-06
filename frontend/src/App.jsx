@@ -8,13 +8,14 @@ const DashboardPage = lazy(() => import("./pages/dashboard/DashboardPage"));
 const InventoryPage = lazy(() => import("./pages/inventory/InventoryPage"));
 const OrdersPage = lazy(() => import("./pages/orders/OrdersPage"));
 const ProfilePage = lazy(() => import("./pages/profile/ProfilePage"));
+const TeamPage = lazy(() => import("./pages/team/TeamPage"));
 
 const App = () => {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center bg-v-page text-sm font-medium text-white/50">
-          Loading…
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <span className="h-10 w-10 animate-spin rounded-full border-2 border-white/10 border-t-v-accent" aria-label="Loading" />
         </div>
       }
     >
@@ -26,12 +27,10 @@ const App = () => {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/orders" element={<OrdersPage />} />
             <Route path="/profile" element={<ProfilePage />} />
-          </Route>
-        </Route>
-
-        <Route element={<ProtectedRoute allowedRoles={["Admin"]} />}>
-          <Route element={<AppLayout />}>
-            <Route path="/inventory" element={<InventoryPage />} />
+            <Route element={<ProtectedRoute allowedRoles={["Admin"]} />}>
+              <Route path="/inventory" element={<InventoryPage />} />
+              <Route path="/team" element={<TeamPage />} />
+            </Route>
           </Route>
         </Route>
 
