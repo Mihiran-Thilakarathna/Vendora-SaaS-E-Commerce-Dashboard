@@ -1,4 +1,4 @@
-import { createPortal } from "react-dom";
+import Modal from "../ui/Modal";
 
 const ConfirmDialog = ({
   open,
@@ -9,44 +9,39 @@ const ConfirmDialog = ({
   onConfirm,
   onCancel,
   danger,
-}) => {
-  if (!open) return null;
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="confirm-title"
-    >
-      <div className="w-full max-w-sm rounded-[24px] border border-white/[0.1] bg-v-card p-6 shadow-v-card">
-        <h2 id="confirm-title" className="text-lg font-bold text-white">
-          {title}
-        </h2>
-        {message ? <p className="mt-2 text-sm text-white/60">{message}</p> : null}
-        <div className="mt-6 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-full border border-white/15 px-4 py-2 text-sm font-semibold text-white/80 hover:bg-white/5"
-          >
-            {cancelLabel}
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            className={`rounded-full px-4 py-2 text-sm font-bold ${
-              danger
-                ? "bg-red-500 text-white hover:bg-red-600"
-                : "bg-v-accent text-black hover:bg-v-accent-hover"
-            }`}
-          >
-            {confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body
-  );
-};
+  busy = false,
+}) => (
+  <Modal
+    open={open}
+    onClose={busy ? undefined : onCancel}
+    title={title}
+    description={message}
+    size="sm"
+    zIndex={100}
+    dismissible={!busy}
+  >
+    <div className="flex justify-end gap-2">
+      <button
+        type="button"
+        onClick={onCancel}
+        disabled={busy}
+        className="rounded-full border border-white/15 px-4 py-2 text-sm font-semibold text-white/80 transition hover:bg-white/5 disabled:opacity-50"
+      >
+        {cancelLabel}
+      </button>
+      <button
+        type="button"
+        onClick={onConfirm}
+        disabled={busy}
+        autoFocus
+        className={`rounded-full px-4 py-2 text-sm font-bold transition disabled:opacity-60 ${
+          danger ? "bg-red-500 text-white hover:bg-red-600" : "bg-v-accent text-black hover:bg-v-accent-hover"
+        }`}
+      >
+        {busy ? "Working…" : confirmLabel}
+      </button>
+    </div>
+  </Modal>
+);
 
 export default ConfirmDialog;

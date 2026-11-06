@@ -30,7 +30,7 @@ export const ToastProvider = ({ children }) => {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="pointer-events-none fixed right-4 top-24 z-[70] flex w-[340px] max-w-[92vw] flex-col gap-2 md:top-4">
+      <div className="pointer-events-none fixed bottom-4 right-4 z-[120] flex w-[340px] max-w-[calc(100vw-2rem)] flex-col gap-2">
         {toasts.map((toast) => {
           const tone =
             toast.type === "success"
