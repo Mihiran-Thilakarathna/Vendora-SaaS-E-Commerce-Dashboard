@@ -4,10 +4,14 @@ const { notifyStaffAdmins } = require("../utils/notifyStaffAdmins");
 
 const getOrders = async (req, res, next) => {
   try {
-    const orders = await Order.find({ store: req.storeId })
+    // Optional ?limit=N (1-100) for callers that only need the newest few, e.g. the dashboard.
+    const limit = Math.min(100, Math.max(0, Number.parseInt(req.query.limit, 10) || 0));
+    let query = Order.find({ store: req.storeId })
       .populate("items.product", "name price category imageURL")
       .populate("createdBy", "name email avatarURL role")
       .sort({ createdAt: -1 });
+    if (limit) query = query.limit(limit);
+    const orders = await query.lean();
 
     return res.status(200).json({
       success: true,

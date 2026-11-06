@@ -264,7 +264,7 @@ const DashboardPage = () => {
 
   const loadRecentOrders = useCallback(async () => {
     try {
-      const { data } = await api.get("/orders");
+      const { data } = await api.get("/orders", { params: { limit: 6 } });
       const list = Array.isArray(data.data) ? data.data : [];
       setRecentOrders(
         [...list].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)).slice(0, 6)
